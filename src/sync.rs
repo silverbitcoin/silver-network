@@ -1,4 +1,4 @@
-use crate::{NetworkError, NetworkMessage, Result};
+use crate::{NetworkError, Result};
 use libp2p::PeerId;
 use silver_core::{Snapshot, Transaction, TransactionDigest};
 use std::collections::HashMap;
@@ -78,7 +78,8 @@ pub enum SyncState {
 /// Snapshot request
 #[derive(Debug, Clone)]
 struct SnapshotRequest {
-    /// Sequence number
+    /// Sequence number (kept for request tracking)
+    #[allow(dead_code)]
     sequence: u64,
 
     /// Requested from peer
@@ -97,7 +98,8 @@ type TransactionRequestId = u64;
 /// Transaction request
 #[derive(Debug, Clone)]
 struct TransactionRequest {
-    /// Request ID
+    /// Request ID (kept for request tracking)
+    #[allow(dead_code)]
     id: TransactionRequestId,
 
     /// From sequence number
@@ -122,10 +124,12 @@ struct PendingSnapshot {
     /// Snapshot
     snapshot: Snapshot,
 
-    /// Received from peer
+    /// Received from peer (kept for peer reputation tracking)
+    #[allow(dead_code)]
     peer_id: PeerId,
 
-    /// Received at
+    /// Received at (kept for timeout tracking)
+    #[allow(dead_code)]
     received_at: Instant,
 }
 
@@ -524,7 +528,7 @@ pub struct SyncProgress {
 mod tests {
     use super::*;
     use libp2p::identity::Keypair;
-    use silver_core::{Snapshot, SnapshotDigest};
+    use silver_core::Snapshot;
 
     fn create_test_peer_id() -> PeerId {
         let keypair = Keypair::generate_ed25519();

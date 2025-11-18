@@ -6,7 +6,7 @@
 //! - Optimized gossip protocol for fast propagation
 
 use snap::raw::{Decoder, Encoder};
-use std::io::{self, Write};
+use std::io;
 use tracing::{debug, trace};
 
 /// Compression threshold in bytes

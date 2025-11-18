@@ -126,7 +126,8 @@ struct ReputationScore {
 /// Blocklist entry
 #[derive(Debug, Clone)]
 struct BlocklistEntry {
-    /// Peer ID
+    /// Peer ID (kept for blocklist management and logging)
+    #[allow(dead_code)]
     peer_id: PeerId,
 
     /// Reason for ban

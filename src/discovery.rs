@@ -1,6 +1,6 @@
 use crate::{NetworkError, Result};
 use libp2p::{
-    kad::{self, QueryId, QueryResult},
+    kad::{QueryId, QueryResult},
     PeerId,
 };
 use multiaddr::Multiaddr;
@@ -33,7 +33,10 @@ pub enum DiscoveryQuery {
     FindPeer(PeerId),
 
     /// Get providers query
-    GetProviders { key: Vec<u8> },
+    GetProviders {
+        /// Content key to find providers for
+        key: Vec<u8>,
+    },
 }
 
 impl PeerDiscovery {
@@ -197,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_pending_queries() {
-        let mut discovery = PeerDiscovery::new(Vec::new());
+        let discovery = PeerDiscovery::new(Vec::new());
         // QueryId is opaque, we can't create it directly in tests
         // This test would need to be integration test with actual DHT
         assert_eq!(discovery.pending_queries_count(), 0);

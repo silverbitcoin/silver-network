@@ -2,7 +2,7 @@ use crate::{NetworkError, NetworkMessage, Result};
 use libp2p::gossipsub::{IdentTopic, MessageId, TopicHash};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Gossip protocol for message propagation
 pub struct GossipProtocol {
@@ -22,13 +22,17 @@ pub struct GossipProtocol {
     stats: GossipStats,
 }
 
-/// Information about a subscribed topic
+/// Information about a subscribed topic.
+///
+/// Tracks metadata and statistics for a gossip topic.
 #[derive(Debug, Clone)]
-struct TopicInfo {
+pub struct TopicInfo {
     /// Topic name
+    #[allow(dead_code)]
     name: String,
 
     /// Topic hash
+    #[allow(dead_code)]
     hash: TopicHash,
 
     /// Number of messages sent on this topic
@@ -41,19 +45,24 @@ struct TopicInfo {
     last_activity: Instant,
 }
 
-/// Cached message for deduplication
+/// Cached message for deduplication.
+///
+/// Stores message metadata for duplicate detection.
 #[derive(Debug, Clone)]
 struct CachedMessage {
     /// Message ID
+    #[allow(dead_code)]
     id: MessageId,
 
-    /// Message data
+    /// Message data (kept for potential future use in message validation)
+    #[allow(dead_code)]
     data: Vec<u8>,
 
     /// Timestamp when cached
     cached_at: Instant,
 
     /// Number of times seen
+    #[allow(dead_code)]
     seen_count: u32,
 }
 

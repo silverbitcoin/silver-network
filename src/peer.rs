@@ -6,10 +6,13 @@ use tracing::{debug, info, warn};
 
 pub use libp2p::PeerId;
 
-/// Information about a connected peer
+/// Information about a connected peer.
+///
+/// Tracks peer metadata, connection status, and statistics.
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     /// Peer ID
+    #[allow(dead_code)]
     pub peer_id: PeerId,
 
     /// Peer addresses
@@ -40,7 +43,9 @@ pub struct PeerInfo {
     pub agent_version: Option<String>,
 }
 
-/// Peer connection status
+/// Peer connection status.
+///
+/// Represents the current state of a peer connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerStatus {
     /// Connecting to peer
