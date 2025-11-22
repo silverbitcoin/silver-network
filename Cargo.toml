@@ -33,6 +33,8 @@ multiaddr = { workspace = true }
 
 # Utilities
 humantime = "2.1"
+snap = "1.1" # OPTIMIZATION: Snappy compression 
+sha2 = "0.10"
 
 [dev-dependencies]
 proptest = { workspace = true }

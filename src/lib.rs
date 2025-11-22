@@ -42,12 +42,16 @@ pub mod message;
 /// Message compression and batching optimization
 pub mod compression;
 
+/// Validator synchronization and broadcasting
+pub mod validator_sync;
+
 pub use behaviour::SilverBehaviour;
 pub use peer::{PeerManager, PeerInfo, PeerId};
 pub use gossip::GossipProtocol;
 pub use discovery::PeerDiscovery;
 pub use sync::StateSync;
 pub use security::{RateLimiter, PeerReputation};
+pub use validator_sync::{ValidatorNetworkManager, NetworkMessage as ValidatorNetworkMessage, PeerInfo as ValidatorPeerInfo, BroadcastResult};
 pub use config::NetworkConfig;
 pub use error::{NetworkError, Result};
 pub use message::{NetworkMessage, MessageType};
