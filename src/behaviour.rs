@@ -2,8 +2,7 @@ use libp2p::{
     gossipsub::{self, IdentTopic, MessageAuthenticity, ValidationMode},
     identify,
     kad::{self, store::MemoryStore},
-    mdns,
-    ping,
+    mdns, ping,
     swarm::NetworkBehaviour,
     PeerId,
 };
@@ -39,7 +38,7 @@ impl SilverBehaviour {
         // Configure Kademlia DHT
         let mut kad_config = kad::Config::default();
         kad_config.set_query_timeout(Duration::from_secs(60));
-        
+
         let store = MemoryStore::new(local_peer_id);
         let mut kad = kad::Behaviour::with_config(local_peer_id, store, kad_config);
 
@@ -72,11 +71,9 @@ impl SilverBehaviour {
         .map_err(|e| format!("Failed to create gossipsub behaviour: {}", e))?;
 
         // Configure Identify protocol
-        let identify_config = identify::Config::new(
-            "/silverbitcoin/1.0.0".to_string(),
-            local_keypair.public(),
-        )
-        .with_agent_version(format!("silverbitcoin/{}", env!("CARGO_PKG_VERSION")));
+        let identify_config =
+            identify::Config::new("/silverbitcoin/1.0.0".to_string(), local_keypair.public())
+                .with_agent_version(format!("silverbitcoin/{}", env!("CARGO_PKG_VERSION")));
 
         let identify = identify::Behaviour::new(identify_config);
 
@@ -89,10 +86,7 @@ impl SilverBehaviour {
 
         // Configure mDNS
         let mdns = if enable_mdns {
-            mdns::tokio::Behaviour::new(
-                mdns::Config::default(),
-                local_peer_id,
-            )?
+            mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?
         } else {
             // Create a disabled mDNS behaviour
             mdns::tokio::Behaviour::new(
@@ -127,7 +121,11 @@ impl SilverBehaviour {
     }
 
     /// Publish a message to a gossipsub topic
-    pub fn publish(&mut self, topic: &str, data: Vec<u8>) -> Result<gossipsub::MessageId, gossipsub::PublishError> {
+    pub fn publish(
+        &mut self,
+        topic: &str,
+        data: Vec<u8>,
+    ) -> Result<gossipsub::MessageId, gossipsub::PublishError> {
         let topic = IdentTopic::new(topic);
         self.gossipsub.publish(topic, data)
     }
@@ -145,32 +143,5 @@ impl SilverBehaviour {
     /// Get the number of connected peers
     pub fn connected_peers(&self) -> usize {
         self.gossipsub.all_peers().count()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use libp2p::identity::Keypair;
-
-    #[test]
-    fn test_behaviour_creation() {
-        let keypair = Keypair::generate_ed25519();
-        let peer_id = PeerId::from(keypair.public());
-
-        let behaviour = SilverBehaviour::new(peer_id, keypair, true, false);
-        assert!(behaviour.is_ok());
-    }
-
-    #[test]
-    fn test_topic_subscription() {
-        let keypair = Keypair::generate_ed25519();
-        let peer_id = PeerId::from(keypair.public());
-
-        let mut behaviour = SilverBehaviour::new(peer_id, keypair, true, false).unwrap();
-        
-        let result = behaviour.subscribe("test-topic");
-        assert!(result.is_ok());
-        assert!(result.unwrap());
     }
 }

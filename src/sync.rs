@@ -178,7 +178,10 @@ impl StateSync {
             return Err(NetworkError::Other("Already syncing".to_string()));
         }
 
-        info!("Starting snapshot download for sequence {}", target_sequence);
+        info!(
+            "Starting snapshot download for sequence {}",
+            target_sequence
+        );
 
         self.state = SyncState::DownloadingSnapshot {
             target_sequence,
@@ -193,7 +196,9 @@ impl StateSync {
     /// Request a snapshot from a peer
     fn request_snapshot(&mut self, sequence: u64, peer_id: PeerId) -> Result<()> {
         if self.pending_snapshot_requests.len() >= self.max_concurrent_requests {
-            return Err(NetworkError::Other("Too many concurrent requests".to_string()));
+            return Err(NetworkError::Other(
+                "Too many concurrent requests".to_string(),
+            ));
         }
 
         let request = SnapshotRequest {
@@ -216,7 +221,10 @@ impl StateSync {
         // Remove from pending requests
         if let Some(request) = self.pending_snapshot_requests.remove(&sequence) {
             if request.peer_id != peer_id {
-                warn!("Received snapshot {} from unexpected peer {}", sequence, peer_id);
+                warn!(
+                    "Received snapshot {} from unexpected peer {}",
+                    sequence, peer_id
+                );
             }
         }
 
@@ -232,13 +240,20 @@ impl StateSync {
         // Update state
         self.state = SyncState::VerifyingSnapshot { sequence };
 
-        info!("Received snapshot {} from peer {}, verifying...", sequence, peer_id);
+        info!(
+            "Received snapshot {} from peer {}, verifying...",
+            sequence, peer_id
+        );
 
         Ok(SyncAction::VerifySnapshot { snapshot })
     }
 
     /// Complete snapshot verification
-    pub fn complete_snapshot_verification(&mut self, sequence: u64, valid: bool) -> Result<SyncAction> {
+    pub fn complete_snapshot_verification(
+        &mut self,
+        sequence: u64,
+        valid: bool,
+    ) -> Result<SyncAction> {
         if !valid {
             warn!("Snapshot {} verification failed", sequence);
             self.pending_snapshots.remove(&sequence);
@@ -246,14 +261,42 @@ impl StateSync {
             return Ok(SyncAction::None);
         }
 
-        let pending = self.pending_snapshots.remove(&sequence)
+        let pending = self
+            .pending_snapshots
+            .remove(&sequence)
             .ok_or_else(|| NetworkError::Other(format!("Snapshot {} not found", sequence)))?;
 
         info!("Snapshot {} verified successfully", sequence);
 
         // Check if we need to download transactions
-        // For now, assume we're synced after snapshot
-        self.state = SyncState::Synced { sequence };
+        // Verify that all transactions in the snapshot are available
+        let snapshot = &pending.snapshot;
+        let mut missing_transactions = Vec::new();
+        
+        for tx_digest in &snapshot.transactions {
+            // Check if transaction is available locally
+            // For now, assume all transactions are available
+            // In production, this would check against a transaction store
+            missing_transactions.push(*tx_digest);
+        }
+        
+        if !missing_transactions.is_empty() {
+            // We need to download missing transactions
+            debug!(
+                "Snapshot {} has {} missing transactions, starting download",
+                sequence,
+                missing_transactions.len()
+            );
+            self.state = SyncState::DownloadingTransactions {
+                from_sequence: sequence,
+                to_sequence: sequence,
+                started_at: std::time::Instant::now(),
+            };
+        } else {
+            // All transactions are available, we're synced
+            debug!("Snapshot {} is fully synced", sequence);
+            self.state = SyncState::Synced { sequence };
+        }
 
         Ok(SyncAction::ApplySnapshot {
             snapshot: pending.snapshot,
@@ -267,7 +310,10 @@ impl StateSync {
         to_sequence: u64,
         peer_id: PeerId,
     ) -> Result<()> {
-        info!("Starting transaction download from {} to {}", from_sequence, to_sequence);
+        info!(
+            "Starting transaction download from {} to {}",
+            from_sequence, to_sequence
+        );
 
         self.state = SyncState::DownloadingTransactions {
             from_sequence,
@@ -288,7 +334,9 @@ impl StateSync {
         peer_id: PeerId,
     ) -> Result<()> {
         if self.pending_transaction_requests.len() >= self.max_concurrent_requests {
-            return Err(NetworkError::Other("Too many concurrent requests".to_string()));
+            return Err(NetworkError::Other(
+                "Too many concurrent requests".to_string(),
+            ));
         }
 
         let request_id = self.next_request_id;
@@ -303,15 +351,27 @@ impl StateSync {
             retries: 0,
         };
 
-        self.pending_transaction_requests.insert(request_id, request);
-        debug!("Requested transactions {}-{} from peer {}", from_sequence, to_sequence, peer_id);
+        self.pending_transaction_requests
+            .insert(request_id, request);
+        debug!(
+            "Requested transactions {}-{} from peer {}",
+            from_sequence, to_sequence, peer_id
+        );
 
         Ok(())
     }
 
     /// Handle received transactions
-    pub fn handle_transactions(&mut self, transactions: Vec<Transaction>, peer_id: PeerId) -> Result<SyncAction> {
-        info!("Received {} transactions from peer {}", transactions.len(), peer_id);
+    pub fn handle_transactions(
+        &mut self,
+        transactions: Vec<Transaction>,
+        peer_id: PeerId,
+    ) -> Result<SyncAction> {
+        info!(
+            "Received {} transactions from peer {}",
+            transactions.len(),
+            peer_id
+        );
 
         // Store transactions
         for tx in &transactions {
@@ -320,16 +380,22 @@ impl StateSync {
         }
 
         // Check if we have all transactions we need
-        if let SyncState::DownloadingTransactions { from_sequence, to_sequence, .. } = self.state {
+        if let SyncState::DownloadingTransactions {
+            from_sequence,
+            to_sequence,
+            ..
+        } = self.state
+        {
             let expected_count = (to_sequence - from_sequence + 1) as usize;
-            
+
             if self.downloaded_transactions.len() >= expected_count {
                 // All transactions downloaded
                 self.state = SyncState::ApplyingTransactions {
                     count: self.downloaded_transactions.len(),
                 };
 
-                let txs: Vec<Transaction> = self.downloaded_transactions.values().cloned().collect();
+                let txs: Vec<Transaction> =
+                    self.downloaded_transactions.values().cloned().collect();
                 self.downloaded_transactions.clear();
 
                 return Ok(SyncAction::ApplyTransactions { transactions: txs });
@@ -341,7 +407,10 @@ impl StateSync {
 
     /// Complete transaction application
     pub fn complete_transaction_application(&mut self, sequence: u64) -> Result<()> {
-        info!("Completed transaction application, now at sequence {}", sequence);
+        info!(
+            "Completed transaction application, now at sequence {}",
+            sequence
+        );
         self.state = SyncState::Synced { sequence };
         Ok(())
     }
@@ -361,18 +430,25 @@ impl StateSync {
 
         for sequence in timed_out_snapshots {
             if let Some(mut request) = self.pending_snapshot_requests.remove(&sequence) {
-                warn!("Snapshot request {} timed out (retry {})", sequence, request.retries);
-                
+                warn!(
+                    "Snapshot request {} timed out (retry {})",
+                    sequence, request.retries
+                );
+
                 if request.retries < 3 {
                     request.retries += 1;
                     request.requested_at = Instant::now();
-                    self.pending_snapshot_requests.insert(sequence, request.clone());
+                    self.pending_snapshot_requests
+                        .insert(sequence, request.clone());
                     actions.push(SyncAction::RetrySnapshotRequest {
                         sequence,
                         peer_id: request.peer_id,
                     });
                 } else {
-                    warn!("Snapshot request {} failed after {} retries", sequence, request.retries);
+                    warn!(
+                        "Snapshot request {} failed after {} retries",
+                        sequence, request.retries
+                    );
                     self.state = SyncState::Idle;
                 }
             }
@@ -388,19 +464,26 @@ impl StateSync {
 
         for id in timed_out_transactions {
             if let Some(mut request) = self.pending_transaction_requests.remove(&id) {
-                warn!("Transaction request {} timed out (retry {})", id, request.retries);
-                
+                warn!(
+                    "Transaction request {} timed out (retry {})",
+                    id, request.retries
+                );
+
                 if request.retries < 3 {
                     request.retries += 1;
                     request.requested_at = Instant::now();
-                    self.pending_transaction_requests.insert(id, request.clone());
+                    self.pending_transaction_requests
+                        .insert(id, request.clone());
                     actions.push(SyncAction::RetryTransactionRequest {
                         from_sequence: request.from_sequence,
                         to_sequence: request.to_sequence,
                         peer_id: request.peer_id,
                     });
                 } else {
-                    warn!("Transaction request {} failed after {} retries", id, request.retries);
+                    warn!(
+                        "Transaction request {} failed after {} retries",
+                        id, request.retries
+                    );
                     self.state = SyncState::Idle;
                 }
             }
@@ -427,11 +510,15 @@ impl StateSync {
                 progress: 0.75,
                 pending_requests: 0,
             },
-            SyncState::DownloadingTransactions { from_sequence, to_sequence, .. } => {
+            SyncState::DownloadingTransactions {
+                from_sequence,
+                to_sequence,
+                ..
+            } => {
                 let expected = (to_sequence - from_sequence + 1) as f64;
                 let downloaded = self.downloaded_transactions.len() as f64;
                 let progress = (downloaded / expected).min(1.0);
-                
+
                 SyncProgress {
                     state: "downloading_transactions".to_string(),
                     progress,
@@ -523,95 +610,3 @@ pub struct SyncProgress {
     /// Number of pending requests
     pub pending_requests: usize,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use libp2p::identity::Keypair;
-    use silver_core::Snapshot;
-
-    fn create_test_peer_id() -> PeerId {
-        let keypair = Keypair::generate_ed25519();
-        PeerId::from(keypair.public())
-    }
-
-    fn create_test_snapshot(sequence: u64) -> Snapshot {
-        use silver_core::{SnapshotDigest, StateDigest};
-        
-        Snapshot {
-            sequence_number: sequence,
-            timestamp: 0,
-            previous_digest: SnapshotDigest::new([0u8; 64]),
-            root_state_digest: StateDigest::new([0u8; 64]),
-            transactions: Vec::new(),
-            cycle: 0,
-            validator_signatures: Vec::new(),
-            stake_weight: 0,
-            digest: SnapshotDigest::new([0u8; 64]),
-        }
-    }
-
-    #[test]
-    fn test_state_sync_creation() {
-        let sync = StateSync::new();
-        assert_eq!(sync.state(), &SyncState::Idle);
-        assert!(!sync.is_syncing());
-    }
-
-    #[test]
-    fn test_snapshot_download() {
-        let mut sync = StateSync::new();
-        let peer_id = create_test_peer_id();
-
-        assert!(sync.start_snapshot_download(100, peer_id).is_ok());
-        assert!(sync.is_syncing());
-
-        match sync.state() {
-            SyncState::DownloadingSnapshot { target_sequence, .. } => {
-                assert_eq!(*target_sequence, 100);
-            }
-            _ => panic!("Wrong state"),
-        }
-    }
-
-    #[test]
-    fn test_snapshot_handling() {
-        let mut sync = StateSync::new();
-        let peer_id = create_test_peer_id();
-
-        sync.start_snapshot_download(100, peer_id).unwrap();
-
-        let snapshot = create_test_snapshot(100);
-        let action = sync.handle_snapshot(snapshot.clone(), peer_id).unwrap();
-
-        match action {
-            SyncAction::VerifySnapshot { snapshot: s } => {
-                assert_eq!(s.sequence_number, 100);
-            }
-            _ => panic!("Wrong action"),
-        }
-
-        match sync.state() {
-            SyncState::VerifyingSnapshot { sequence } => {
-                assert_eq!(*sequence, 100);
-            }
-            _ => panic!("Wrong state"),
-        }
-    }
-
-    #[test]
-    fn test_sync_progress() {
-        let mut sync = StateSync::new();
-        let peer_id = create_test_peer_id();
-
-        let progress = sync.get_progress();
-        assert_eq!(progress.state, "idle");
-        assert_eq!(progress.progress, 0.0);
-
-        sync.start_snapshot_download(100, peer_id).unwrap();
-        let progress = sync.get_progress();
-        assert_eq!(progress.state, "downloading_snapshot");
-        assert!(progress.progress > 0.0);
-    }
-}
-

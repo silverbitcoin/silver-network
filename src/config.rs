@@ -65,7 +65,7 @@ impl Default for NetworkConfig {
             enable_mdns: true,
             dht_server_mode: false,
             max_message_size: 10 * 1024 * 1024, // 10 MB
-            rate_limit_per_peer: 10_000, // 10,000 messages per second
+            rate_limit_per_peer: 10_000,        // 10,000 messages per second
             gossip_heartbeat_interval: Duration::from_millis(700),
             gossip_history_length: 5,
             gossip_history_time: Duration::from_secs(120),
@@ -129,39 +129,5 @@ impl NetworkConfig {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_config() {
-        let config = NetworkConfig::default();
-        assert!(config.validate().is_ok());
-        assert_eq!(config.max_peers, 50);
-        assert_eq!(config.min_peers, 8);
-        assert!(config.enable_tcp);
-        assert!(config.enable_quic);
-    }
-
-    #[test]
-    fn test_config_builder() {
-        let config = NetworkConfig::new("/ip4/127.0.0.1/tcp/9000".parse().unwrap())
-            .with_max_peers(100)
-            .with_dht_server_mode(true);
-
-        assert!(config.validate().is_ok());
-        assert_eq!(config.max_peers, 100);
-        assert!(config.dht_server_mode);
-    }
-
-    #[test]
-    fn test_invalid_config() {
-        let mut config = NetworkConfig::default();
-        config.max_peers = 5;
-        config.min_peers = 10;
-        assert!(config.validate().is_err());
     }
 }

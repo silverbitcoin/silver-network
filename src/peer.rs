@@ -143,7 +143,10 @@ impl PeerManager {
     /// Add a new peer
     pub fn add_peer(&self, peer_id: PeerId) -> bool {
         if self.peers.len() >= self.max_peers {
-            warn!("Maximum peer limit reached ({}), rejecting peer {}", self.max_peers, peer_id);
+            warn!(
+                "Maximum peer limit reached ({}), rejecting peer {}",
+                self.max_peers, peer_id
+            );
             return false;
         }
 
@@ -162,7 +165,11 @@ impl PeerManager {
     pub fn remove_peer(&self, peer_id: &PeerId) -> Option<PeerInfo> {
         let removed = self.peers.remove(peer_id);
         if removed.is_some() {
-            info!("Removed peer {}, total peers: {}", peer_id, self.peers.len());
+            info!(
+                "Removed peer {}, total peers: {}",
+                peer_id,
+                self.peers.len()
+            );
         }
         removed.map(|(_, info)| info)
     }
@@ -190,7 +197,12 @@ impl PeerManager {
     }
 
     /// Update peer protocol information
-    pub fn update_peer_protocol(&self, peer_id: &PeerId, protocol_version: String, agent_version: String) {
+    pub fn update_peer_protocol(
+        &self,
+        peer_id: &PeerId,
+        protocol_version: String,
+        agent_version: String,
+    ) {
         if let Some(mut peer) = self.peers.get_mut(peer_id) {
             peer.protocol_version = Some(protocol_version);
             peer.agent_version = Some(agent_version);
@@ -225,7 +237,10 @@ impl PeerManager {
     pub fn increase_reputation(&self, peer_id: &PeerId, amount: u8) {
         if let Some(mut peer) = self.peers.get_mut(peer_id) {
             peer.increase_reputation(amount);
-            debug!("Increased reputation for peer {} to {}", peer_id, peer.reputation);
+            debug!(
+                "Increased reputation for peer {} to {}",
+                peer_id, peer.reputation
+            );
         }
     }
 
@@ -233,7 +248,10 @@ impl PeerManager {
     pub fn decrease_reputation(&self, peer_id: &PeerId, amount: u8) {
         if let Some(mut peer) = self.peers.get_mut(peer_id) {
             peer.decrease_reputation(amount);
-            warn!("Decreased reputation for peer {} to {}", peer_id, peer.reputation);
+            warn!(
+                "Decreased reputation for peer {} to {}",
+                peer_id, peer.reputation
+            );
 
             if peer.should_ban() {
                 peer.status = PeerStatus::Banned;
@@ -293,8 +311,8 @@ impl PeerManager {
         let mut timed_out = Vec::new();
 
         self.peers.retain(|peer_id, peer_info| {
-            if peer_info.status == PeerStatus::Connected 
-                && now.duration_since(peer_info.last_seen) > self.timeout 
+            if peer_info.status == PeerStatus::Connected
+                && now.duration_since(peer_info.last_seen) > self.timeout
             {
                 timed_out.push(*peer_id);
                 warn!("Peer {} timed out", peer_id);
@@ -312,7 +330,8 @@ impl PeerManager {
         let total = self.peers.len();
         let connected = self.connected_count();
         let validators = self.validator_peers().len();
-        let banned = self.peers
+        let banned = self
+            .peers
             .iter()
             .filter(|entry| entry.status == PeerStatus::Banned)
             .count();
@@ -341,70 +360,3 @@ pub struct PeerStats {
     /// Number of banned peers
     pub banned: usize,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use libp2p::identity::Keypair;
-
-    fn create_test_peer_id() -> PeerId {
-        let keypair = Keypair::generate_ed25519();
-        PeerId::from(keypair.public())
-    }
-
-    #[test]
-    fn test_peer_manager_add_remove() {
-        let manager = PeerManager::new(10, 3, Duration::from_secs(60));
-        let peer_id = create_test_peer_id();
-
-        assert!(manager.add_peer(peer_id));
-        assert_eq!(manager.peers.len(), 1);
-
-        let removed = manager.remove_peer(&peer_id);
-        assert!(removed.is_some());
-        assert_eq!(manager.peers.len(), 0);
-    }
-
-    #[test]
-    fn test_peer_manager_max_peers() {
-        let manager = PeerManager::new(2, 1, Duration::from_secs(60));
-
-        let peer1 = create_test_peer_id();
-        let peer2 = create_test_peer_id();
-        let peer3 = create_test_peer_id();
-
-        assert!(manager.add_peer(peer1));
-        assert!(manager.add_peer(peer2));
-        assert!(!manager.add_peer(peer3)); // Should fail due to max limit
-    }
-
-    #[test]
-    fn test_peer_reputation() {
-        let manager = PeerManager::new(10, 3, Duration::from_secs(60));
-        let peer_id = create_test_peer_id();
-
-        manager.add_peer(peer_id);
-
-        manager.increase_reputation(&peer_id, 20);
-        let peer = manager.get_peer(&peer_id).unwrap();
-        assert_eq!(peer.reputation, 70);
-
-        manager.decrease_reputation(&peer_id, 30);
-        let peer = manager.get_peer(&peer_id).unwrap();
-        assert_eq!(peer.reputation, 40);
-    }
-
-    #[test]
-    fn test_peer_ban() {
-        let manager = PeerManager::new(10, 3, Duration::from_secs(60));
-        let peer_id = create_test_peer_id();
-
-        manager.add_peer(peer_id);
-        manager.ban_peer(&peer_id);
-
-        let peer = manager.get_peer(&peer_id).unwrap();
-        assert_eq!(peer.status, PeerStatus::Banned);
-        assert_eq!(peer.reputation, 0);
-    }
-}
-

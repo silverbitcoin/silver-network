@@ -36,6 +36,15 @@ pub mod config;
 /// Error types for network operations
 pub mod error;
 
+/// Error recovery strategies and mechanisms
+pub mod error_recovery;
+
+/// Comprehensive error logging with context
+pub mod error_logging;
+
+/// Comprehensive error handling integration
+pub mod error_handling;
+
 /// Network message types and serialization
 pub mod message;
 
@@ -46,16 +55,26 @@ pub mod compression;
 pub mod validator_sync;
 
 pub use behaviour::SilverBehaviour;
-pub use peer::{PeerManager, PeerInfo, PeerId};
-pub use gossip::GossipProtocol;
-pub use discovery::PeerDiscovery;
-pub use sync::StateSync;
-pub use security::{RateLimiter, PeerReputation};
-pub use validator_sync::{ValidatorNetworkManager, NetworkMessage as ValidatorNetworkMessage, PeerInfo as ValidatorPeerInfo, BroadcastResult};
+pub use compression::{BatchStats, CompressionStats, MessageBatcher, MessageCompressor};
 pub use config::NetworkConfig;
-pub use error::{NetworkError, Result};
-pub use message::{NetworkMessage, MessageType};
-pub use compression::{MessageCompressor, MessageBatcher, CompressionStats, BatchStats};
+pub use discovery::PeerDiscovery;
+pub use error::{
+    DefaultErrorHandler, ErrorContext, ErrorHandler, NetworkError, RecoveryStrategy, Result,
+};
+pub use error_logging::{ErrorCategory, ErrorLogger, ErrorLogEntry, ErrorMetrics, ErrorSummary};
+pub use error_recovery::{
+    ErrorRecoveryManager, ExponentialBackoff, RateLimiter, RecoveryAction,
+};
+pub use error_handling::{ComprehensiveErrorHandler, ErrorHandlingResult};
+pub use gossip::GossipProtocol;
+pub use message::{MessageType, NetworkMessage};
+pub use peer::{PeerId, PeerInfo, PeerManager};
+pub use security::{PeerReputation, RateLimiter as SecurityRateLimiter};
+pub use sync::StateSync;
+pub use validator_sync::{
+    BroadcastResult, NetworkMessage as ValidatorNetworkMessage, PeerInfo as ValidatorPeerInfo,
+    ValidatorNetworkManager,
+};
 
 /// Network handle for broadcasting and communication.
 ///
@@ -83,15 +102,18 @@ impl NetworkHandle {
     /// Broadcast a batch to all validators
     pub async fn broadcast_batch(&self, batch: &silver_core::TransactionBatch) -> Result<()> {
         // Serialize batch
-        let data = bincode::serialize(batch)
-            .map_err(|e| NetworkError::Serialization(e.to_string()))?;
+        let data =
+            bincode::serialize(batch).map_err(|e| NetworkError::Serialization(e.to_string()))?;
 
         // Broadcast via gossip
         self.gossip.broadcast(MessageType::Batch, data).await
     }
 
     /// Broadcast a certificate to all validators
-    pub async fn broadcast_certificate(&self, certificate: &silver_core::Certificate) -> Result<()> {
+    pub async fn broadcast_certificate(
+        &self,
+        certificate: &silver_core::Certificate,
+    ) -> Result<()> {
         // Serialize certificate
         let data = bincode::serialize(certificate)
             .map_err(|e| NetworkError::Serialization(e.to_string()))?;

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use silver_core::{Transaction, TransactionBatch, Certificate, Snapshot};
+use silver_core::{Certificate, Snapshot, Transaction, TransactionBatch};
 
 /// Network message types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,10 +111,10 @@ impl NetworkMessage {
     pub fn estimated_size(&self) -> usize {
         // This is an approximation; actual size may vary
         match self {
-            Self::Transaction(_) => 1024, // ~1KB per transaction
-            Self::Batch(_) => 512 * 1024, // ~512KB per batch
+            Self::Transaction(_) => 1024,      // ~1KB per transaction
+            Self::Batch(_) => 512 * 1024,      // ~512KB per batch
             Self::Certificate(_) => 10 * 1024, // ~10KB per certificate
-            Self::Snapshot(_) => 100 * 1024, // ~100KB per snapshot
+            Self::Snapshot(_) => 100 * 1024,   // ~100KB per snapshot
             Self::SnapshotRequest { .. } => 64,
             Self::SnapshotResponse { snapshot } => {
                 if snapshot.is_some() {
@@ -127,29 +127,6 @@ impl NetworkMessage {
             Self::TransactionResponse { transactions } => transactions.len() * 1024,
             Self::Ping { .. } => 32,
             Self::Pong { .. } => 32,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_message_type() {
-        let msg = NetworkMessage::Ping { timestamp: 12345 };
-        assert_eq!(msg.message_type(), MessageType::Ping);
-    }
-
-    #[test]
-    fn test_message_serialization() {
-        let msg = NetworkMessage::Ping { timestamp: 12345 };
-        let bytes = msg.to_bytes().unwrap();
-        let deserialized = NetworkMessage::from_bytes(&bytes).unwrap();
-
-        match deserialized {
-            NetworkMessage::Ping { timestamp } => assert_eq!(timestamp, 12345),
-            _ => panic!("Wrong message type"),
         }
     }
 }

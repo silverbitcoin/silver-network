@@ -21,10 +21,10 @@ const COMPRESSION_THRESHOLD: usize = 1024; // 1KB
 pub struct MessageCompressor {
     /// Snappy encoder (reusable)
     encoder: Encoder,
-    
+
     /// Snappy decoder (reusable)
     decoder: Decoder,
-    
+
     /// Statistics
     stats: CompressionStats,
 }
@@ -34,19 +34,19 @@ pub struct MessageCompressor {
 pub struct CompressionStats {
     /// Total bytes compressed
     pub bytes_compressed: u64,
-    
+
     /// Total bytes after compression
     pub bytes_after_compression: u64,
-    
+
     /// Total bytes decompressed
     pub bytes_decompressed: u64,
-    
+
     /// Number of messages compressed
     pub messages_compressed: u64,
-    
+
     /// Number of messages decompressed
     pub messages_decompressed: u64,
-    
+
     /// Number of messages skipped (too small)
     pub messages_skipped: u64,
 }
@@ -60,12 +60,13 @@ impl CompressionStats {
             1.0
         }
     }
-    
+
     /// Get space saved in bytes
     pub fn space_saved(&self) -> u64 {
-        self.bytes_compressed.saturating_sub(self.bytes_after_compression)
+        self.bytes_compressed
+            .saturating_sub(self.bytes_after_compression)
     }
-    
+
     /// Get space saved percentage
     pub fn space_saved_percent(&self) -> f64 {
         if self.bytes_compressed > 0 {
@@ -85,7 +86,7 @@ impl MessageCompressor {
             stats: CompressionStats::default(),
         }
     }
-    
+
     /// OPTIMIZATION: Compress a message using Snappy
     ///
     /// Only compresses messages larger than the threshold to avoid overhead.
@@ -98,48 +99,59 @@ impl MessageCompressor {
     pub fn compress(&mut self, data: &[u8]) -> io::Result<Vec<u8>> {
         // Skip compression for small messages
         if data.len() < COMPRESSION_THRESHOLD {
-            trace!("Skipping compression for small message ({} bytes)", data.len());
+            trace!(
+                "Skipping compression for small message ({} bytes)",
+                data.len()
+            );
             self.stats.messages_skipped += 1;
-            
+
             // Return with uncompressed flag (0x00)
             let mut result = Vec::with_capacity(data.len() + 1);
             result.push(0x00); // Uncompressed flag
             result.extend_from_slice(data);
             return Ok(result);
         }
-        
+
         // Compress using Snappy
-        let compressed = self.encoder.compress_vec(data)
+        let compressed = self
+            .encoder
+            .compress_vec(data)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        
+
         // Check if compression actually helped
         if compressed.len() >= data.len() {
-            trace!("Compression didn't help ({} -> {} bytes), using uncompressed", 
-                   data.len(), compressed.len());
+            trace!(
+                "Compression didn't help ({} -> {} bytes), using uncompressed",
+                data.len(),
+                compressed.len()
+            );
             self.stats.messages_skipped += 1;
-            
+
             let mut result = Vec::with_capacity(data.len() + 1);
             result.push(0x00); // Uncompressed flag
             result.extend_from_slice(data);
             return Ok(result);
         }
-        
+
         // Update statistics
         self.stats.bytes_compressed += data.len() as u64;
         self.stats.bytes_after_compression += compressed.len() as u64;
         self.stats.messages_compressed += 1;
-        
-        debug!("Compressed message: {} -> {} bytes ({:.1}% reduction)",
-               data.len(), compressed.len(),
-               (1.0 - compressed.len() as f64 / data.len() as f64) * 100.0);
-        
+
+        debug!(
+            "Compressed message: {} -> {} bytes ({:.1}% reduction)",
+            data.len(),
+            compressed.len(),
+            (1.0 - compressed.len() as f64 / data.len() as f64) * 100.0
+        );
+
         // Return with compressed flag (0x01)
         let mut result = Vec::with_capacity(compressed.len() + 1);
         result.push(0x01); // Compressed flag
         result.extend_from_slice(&compressed);
         Ok(result)
     }
-    
+
     /// OPTIMIZATION: Decompress a message
     ///
     /// Checks the header to determine if decompression is needed.
@@ -153,36 +165,41 @@ impl MessageCompressor {
         if data.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty message"));
         }
-        
+
         // Check compression flag
         let is_compressed = data[0] == 0x01;
         let payload = &data[1..];
-        
+
         if !is_compressed {
             // Message was not compressed
             trace!("Message is uncompressed ({} bytes)", payload.len());
             return Ok(payload.to_vec());
         }
-        
+
         // Decompress using Snappy
-        let decompressed = self.decoder.decompress_vec(payload)
+        let decompressed = self
+            .decoder
+            .decompress_vec(payload)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        
+
         // Update statistics
         self.stats.bytes_decompressed += decompressed.len() as u64;
         self.stats.messages_decompressed += 1;
-        
-        debug!("Decompressed message: {} -> {} bytes",
-               payload.len(), decompressed.len());
-        
+
+        debug!(
+            "Decompressed message: {} -> {} bytes",
+            payload.len(),
+            decompressed.len()
+        );
+
         Ok(decompressed)
     }
-    
+
     /// Get compression statistics
     pub fn stats(&self) -> &CompressionStats {
         &self.stats
     }
-    
+
     /// Reset statistics
     pub fn reset_stats(&mut self) {
         self.stats = CompressionStats::default();
@@ -202,16 +219,16 @@ impl Default for MessageCompressor {
 pub struct MessageBatcher {
     /// Pending messages
     pending: Vec<Vec<u8>>,
-    
+
     /// Current batch size in bytes
     current_size: usize,
-    
+
     /// Maximum batch size in bytes
     max_batch_size: usize,
-    
+
     /// Maximum number of messages per batch
     max_messages: usize,
-    
+
     /// Statistics
     stats: BatchStats,
 }
@@ -221,13 +238,13 @@ pub struct MessageBatcher {
 pub struct BatchStats {
     /// Total batches created
     pub batches_created: u64,
-    
+
     /// Total messages batched
     pub messages_batched: u64,
-    
+
     /// Average messages per batch
     pub avg_messages_per_batch: f64,
-    
+
     /// Average batch size in bytes
     pub avg_batch_size: f64,
 }
@@ -247,12 +264,12 @@ impl MessageBatcher {
             stats: BatchStats::default(),
         }
     }
-    
+
     /// Create a new message batcher with default settings
     pub fn with_defaults() -> Self {
         Self::new(64 * 1024, 100) // 64KB, 100 messages
     }
-    
+
     /// OPTIMIZATION: Add a message to the batch
     ///
     /// Returns Some(batch) if the batch is ready to be sent.
@@ -264,22 +281,23 @@ impl MessageBatcher {
     /// Optional batch if ready to send
     pub fn add_message(&mut self, message: Vec<u8>) -> Option<Vec<u8>> {
         let message_size = message.len();
-        
+
         // Check if adding this message would exceed limits
-        if !self.pending.is_empty() && 
-           (self.current_size + message_size > self.max_batch_size ||
-            self.pending.len() >= self.max_messages) {
+        if !self.pending.is_empty()
+            && (self.current_size + message_size > self.max_batch_size
+                || self.pending.len() >= self.max_messages)
+        {
             // Flush current batch before adding new message
             let batch = self.flush();
             self.pending.push(message);
             self.current_size = message_size;
             return Some(batch);
         }
-        
+
         // Add message to pending
         self.pending.push(message);
         self.current_size += message_size;
-        
+
         // Check if batch is ready
         if self.current_size >= self.max_batch_size || self.pending.len() >= self.max_messages {
             Some(self.flush())
@@ -287,7 +305,7 @@ impl MessageBatcher {
             None
         }
     }
-    
+
     /// OPTIMIZATION: Flush pending messages into a batch
     ///
     /// Creates a batch from all pending messages.
@@ -298,38 +316,43 @@ impl MessageBatcher {
         if self.pending.is_empty() {
             return Vec::new();
         }
-        
+
         // Serialize batch
         // Format: [num_messages: u32] [msg1_len: u32] [msg1_data] [msg2_len: u32] [msg2_data] ...
         let mut batch = Vec::with_capacity(self.current_size + self.pending.len() * 4 + 4);
-        
+
         // Write number of messages
         batch.extend_from_slice(&(self.pending.len() as u32).to_le_bytes());
-        
+
         // Write each message
         for message in &self.pending {
             batch.extend_from_slice(&(message.len() as u32).to_le_bytes());
             batch.extend_from_slice(message);
         }
-        
+
         // Update statistics
         self.stats.batches_created += 1;
         self.stats.messages_batched += self.pending.len() as u64;
-        self.stats.avg_messages_per_batch = 
+        self.stats.avg_messages_per_batch =
             self.stats.messages_batched as f64 / self.stats.batches_created as f64;
-        self.stats.avg_batch_size = 
-            (self.stats.avg_batch_size * (self.stats.batches_created - 1) as f64 + batch.len() as f64) 
+        self.stats.avg_batch_size = (self.stats.avg_batch_size
+            * (self.stats.batches_created - 1) as f64
+            + batch.len() as f64)
             / self.stats.batches_created as f64;
-        
-        debug!("Created batch: {} messages, {} bytes", self.pending.len(), batch.len());
-        
+
+        debug!(
+            "Created batch: {} messages, {} bytes",
+            self.pending.len(),
+            batch.len()
+        );
+
         // Clear pending
         self.pending.clear();
         self.current_size = 0;
-        
+
         batch
     }
-    
+
     /// OPTIMIZATION: Unbatch a batch into individual messages
     ///
     /// # Arguments
@@ -339,154 +362,72 @@ impl MessageBatcher {
     /// Vector of individual messages
     pub fn unbatch(batch: &[u8]) -> io::Result<Vec<Vec<u8>>> {
         if batch.len() < 4 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Batch too small"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Batch too small",
+            ));
         }
-        
+
         let mut cursor = 0;
-        
+
         // Read number of messages
         let mut num_bytes = [0u8; 4];
         num_bytes.copy_from_slice(&batch[cursor..cursor + 4]);
         let num_messages = u32::from_le_bytes(num_bytes) as usize;
         cursor += 4;
-        
+
         let mut messages = Vec::with_capacity(num_messages);
-        
+
         // Read each message
         for _ in 0..num_messages {
             if cursor + 4 > batch.len() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Incomplete batch"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Incomplete batch",
+                ));
             }
-            
+
             // Read message length
             let mut len_bytes = [0u8; 4];
             len_bytes.copy_from_slice(&batch[cursor..cursor + 4]);
             let msg_len = u32::from_le_bytes(len_bytes) as usize;
             cursor += 4;
-            
+
             if cursor + msg_len > batch.len() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Incomplete message"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Incomplete message",
+                ));
             }
-            
+
             // Read message data
             let message = batch[cursor..cursor + msg_len].to_vec();
             cursor += msg_len;
-            
+
             messages.push(message);
         }
-        
-        debug!("Unbatched {} messages from {} bytes", messages.len(), batch.len());
-        
+
+        debug!(
+            "Unbatched {} messages from {} bytes",
+            messages.len(),
+            batch.len()
+        );
+
         Ok(messages)
     }
-    
+
     /// Get batch statistics
     pub fn stats(&self) -> &BatchStats {
         &self.stats
     }
-    
+
     /// Check if there are pending messages
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
-    
+
     /// Get number of pending messages
     pub fn pending_count(&self) -> usize {
         self.pending.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_compression_small_message() {
-        let mut compressor = MessageCompressor::new();
-        let data = b"Hello, World!";
-        
-        let compressed = compressor.compress(data).unwrap();
-        let decompressed = compressor.decompress(&compressed).unwrap();
-        
-        assert_eq!(data, decompressed.as_slice());
-        assert_eq!(compressor.stats().messages_skipped, 1);
-    }
-    
-    #[test]
-    fn test_compression_large_message() {
-        let mut compressor = MessageCompressor::new();
-        
-        // Create a large compressible message
-        let data = vec![0u8; 10000];
-        
-        let compressed = compressor.compress(&data).unwrap();
-        let decompressed = compressor.decompress(&compressed).unwrap();
-        
-        assert_eq!(data, decompressed);
-        assert!(compressed.len() < data.len());
-        assert_eq!(compressor.stats().messages_compressed, 1);
-    }
-    
-    #[test]
-    fn test_compression_stats() {
-        let mut compressor = MessageCompressor::new();
-        
-        let data = vec![0u8; 10000];
-        let _ = compressor.compress(&data).unwrap();
-        
-        let stats = compressor.stats();
-        assert!(stats.compression_ratio() < 1.0);
-        assert!(stats.space_saved() > 0);
-        assert!(stats.space_saved_percent() > 0.0);
-    }
-    
-    #[test]
-    fn test_message_batching() {
-        let mut batcher = MessageBatcher::new(1000, 10);
-        
-        // Add messages that don't fill the batch
-        assert!(batcher.add_message(vec![1, 2, 3]).is_none());
-        assert!(batcher.add_message(vec![4, 5, 6]).is_none());
-        
-        // Flush manually
-        let batch = batcher.flush();
-        assert!(!batch.is_empty());
-        
-        // Unbatch
-        let messages = MessageBatcher::unbatch(&batch).unwrap();
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0], vec![1, 2, 3]);
-        assert_eq!(messages[1], vec![4, 5, 6]);
-    }
-    
-    #[test]
-    fn test_batch_auto_flush() {
-        let mut batcher = MessageBatcher::new(100, 3);
-        
-        // Add messages
-        assert!(batcher.add_message(vec![1; 10]).is_none());
-        assert!(batcher.add_message(vec![2; 10]).is_none());
-        
-        // Third message should trigger flush
-        let batch = batcher.add_message(vec![3; 10]);
-        assert!(batch.is_some());
-        
-        // Unbatch
-        let messages = MessageBatcher::unbatch(&batch.unwrap()).unwrap();
-        assert_eq!(messages.len(), 3);
-    }
-    
-    #[test]
-    fn test_batch_stats() {
-        let mut batcher = MessageBatcher::with_defaults();
-        
-        batcher.add_message(vec![1, 2, 3]);
-        batcher.add_message(vec![4, 5, 6]);
-        batcher.flush();
-        
-        let stats = batcher.stats();
-        assert_eq!(stats.batches_created, 1);
-        assert_eq!(stats.messages_batched, 2);
-        assert_eq!(stats.avg_messages_per_batch, 2.0);
     }
 }

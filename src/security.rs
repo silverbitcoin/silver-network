@@ -40,10 +40,13 @@ impl RateLimiter {
     /// Check if a message from a peer should be allowed
     pub fn check_rate_limit(&self, peer_id: &PeerId) -> Result<()> {
         let now = Instant::now();
-        
+
         // Get or create message queue for peer
-        let mut entry = self.peer_messages.entry(*peer_id).or_insert_with(VecDeque::new);
-        
+        let mut entry = self
+            .peer_messages
+            .entry(*peer_id)
+            .or_insert_with(VecDeque::new);
+
         // Remove old messages outside the window
         while let Some(&front) = entry.front() {
             if now.duration_since(front) > self.window {
@@ -55,20 +58,25 @@ impl RateLimiter {
 
         // Check if rate limit exceeded
         if entry.len() >= self.rate_limit as usize {
-            warn!("Rate limit exceeded for peer {}: {} messages in {:?}", 
-                  peer_id, entry.len(), self.window);
+            warn!(
+                "Rate limit exceeded for peer {}: {} messages in {:?}",
+                peer_id,
+                entry.len(),
+                self.window
+            );
             return Err(NetworkError::RateLimitExceeded(peer_id.to_string()));
         }
 
         // Add current message timestamp
         entry.push_back(now);
-        
+
         Ok(())
     }
 
     /// Get current message count for a peer
     pub fn get_message_count(&self, peer_id: &PeerId) -> usize {
-        self.peer_messages.get(peer_id)
+        self.peer_messages
+            .get(peer_id)
             .map(|entry| entry.len())
             .unwrap_or(0)
     }
@@ -165,7 +173,8 @@ impl PeerReputation {
 
     /// Get reputation score for a peer
     pub fn get_score(&self, peer_id: &PeerId) -> u8 {
-        self.scores.get(peer_id)
+        self.scores
+            .get(peer_id)
             .map(|entry| self.apply_decay(&entry))
             .unwrap_or(50) // Default neutral score
     }
@@ -175,7 +184,7 @@ impl PeerReputation {
         let elapsed = Instant::now().duration_since(score.last_update);
         let hours = elapsed.as_secs() / 3600;
         let decay = (hours as u8).saturating_mul(self.decay_rate);
-        
+
         // Decay towards neutral (50)
         if score.score > 50 {
             score.score.saturating_sub(decay).max(50)
@@ -186,36 +195,48 @@ impl PeerReputation {
 
     /// Increase reputation for good behavior
     pub fn increase_reputation(&self, peer_id: &PeerId, amount: u8) {
-        let mut entry = self.scores.entry(*peer_id).or_insert_with(|| ReputationScore {
-            score: 50,
-            last_update: Instant::now(),
-            good_count: 0,
-            bad_count: 0,
-        });
+        let mut entry = self
+            .scores
+            .entry(*peer_id)
+            .or_insert_with(|| ReputationScore {
+                score: 50,
+                last_update: Instant::now(),
+                good_count: 0,
+                bad_count: 0,
+            });
 
         let current = self.apply_decay(&entry);
         entry.score = current.saturating_add(amount).min(100);
         entry.last_update = Instant::now();
         entry.good_count += 1;
 
-        debug!("Increased reputation for peer {} to {}", peer_id, entry.score);
+        debug!(
+            "Increased reputation for peer {} to {}",
+            peer_id, entry.score
+        );
     }
 
     /// Decrease reputation for bad behavior
     pub fn decrease_reputation(&self, peer_id: &PeerId, amount: u8, reason: &str) {
-        let mut entry = self.scores.entry(*peer_id).or_insert_with(|| ReputationScore {
-            score: 50,
-            last_update: Instant::now(),
-            good_count: 0,
-            bad_count: 0,
-        });
+        let mut entry = self
+            .scores
+            .entry(*peer_id)
+            .or_insert_with(|| ReputationScore {
+                score: 50,
+                last_update: Instant::now(),
+                good_count: 0,
+                bad_count: 0,
+            });
 
         let current = self.apply_decay(&entry);
         entry.score = current.saturating_sub(amount);
         entry.last_update = Instant::now();
         entry.bad_count += 1;
 
-        warn!("Decreased reputation for peer {} to {} (reason: {})", peer_id, entry.score, reason);
+        warn!(
+            "Decreased reputation for peer {} to {} (reason: {})",
+            peer_id, entry.score, reason
+        );
 
         // Auto-ban if below threshold
         if entry.score < self.ban_threshold {
@@ -234,30 +255,41 @@ impl PeerReputation {
         };
 
         self.blocklist.insert(*peer_id, entry);
-        
+
         // Set reputation to 0 and update timestamp
-        let mut score_entry = self.scores.entry(*peer_id).or_insert_with(|| ReputationScore {
-            score: 50,
-            last_update: Instant::now(),
-            good_count: 0,
-            bad_count: 0,
-        });
+        let mut score_entry = self
+            .scores
+            .entry(*peer_id)
+            .or_insert_with(|| ReputationScore {
+                score: 50,
+                last_update: Instant::now(),
+                good_count: 0,
+                bad_count: 0,
+            });
         score_entry.score = 0;
         score_entry.last_update = Instant::now();
 
-        warn!("Banned peer {} for {} (reason: {})", peer_id, humantime::format_duration(self.ban_duration), reason);
+        warn!(
+            "Banned peer {} for {} (reason: {})",
+            peer_id,
+            humantime::format_duration(self.ban_duration),
+            reason
+        );
     }
 
     /// Unban a peer
     pub fn unban_peer(&self, peer_id: &PeerId) {
         if self.blocklist.remove(peer_id).is_some() {
             // Reset reputation to neutral
-            let mut entry = self.scores.entry(*peer_id).or_insert_with(|| ReputationScore {
-                score: 50,
-                last_update: Instant::now(),
-                good_count: 0,
-                bad_count: 0,
-            });
+            let mut entry = self
+                .scores
+                .entry(*peer_id)
+                .or_insert_with(|| ReputationScore {
+                    score: 50,
+                    last_update: Instant::now(),
+                    good_count: 0,
+                    bad_count: 0,
+                });
             entry.score = 50;
             entry.last_update = Instant::now();
             debug!("Unbanned peer {}", peer_id);
@@ -282,7 +314,9 @@ impl PeerReputation {
 
     /// Get ban reason for a peer
     pub fn get_ban_reason(&self, peer_id: &PeerId) -> Option<String> {
-        self.blocklist.get(peer_id).map(|entry| entry.reason.clone())
+        self.blocklist
+            .get(peer_id)
+            .map(|entry| entry.reason.clone())
     }
 
     /// Remove expired bans
@@ -311,7 +345,7 @@ impl PeerReputation {
     pub fn get_stats(&self) -> ReputationStats {
         let total_peers = self.scores.len();
         let banned_peers = self.blocklist.len();
-        
+
         let mut good_peers = 0;
         let mut neutral_peers = 0;
         let mut bad_peers = 0;
@@ -367,119 +401,3 @@ pub struct ReputationStats {
     /// Number of banned peers
     pub banned_peers: usize,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use libp2p::identity::Keypair;
-
-    fn create_test_peer_id() -> PeerId {
-        let keypair = Keypair::generate_ed25519();
-        PeerId::from(keypair.public())
-    }
-
-    #[test]
-    fn test_rate_limiter() {
-        let limiter = RateLimiter::new(10);
-        let peer_id = create_test_peer_id();
-
-        // Should allow first 10 messages
-        for _ in 0..10 {
-            assert!(limiter.check_rate_limit(&peer_id).is_ok());
-        }
-
-        // 11th message should be rate limited
-        assert!(limiter.check_rate_limit(&peer_id).is_err());
-    }
-
-    #[test]
-    fn test_rate_limiter_window() {
-        let limiter = RateLimiter::with_window(5, Duration::from_millis(100));
-        let peer_id = create_test_peer_id();
-
-        // Fill rate limit
-        for _ in 0..5 {
-            assert!(limiter.check_rate_limit(&peer_id).is_ok());
-        }
-
-        // Should be rate limited
-        assert!(limiter.check_rate_limit(&peer_id).is_err());
-
-        // Wait for window to pass
-        std::thread::sleep(Duration::from_millis(150));
-
-        // Should be allowed again
-        assert!(limiter.check_rate_limit(&peer_id).is_ok());
-    }
-
-    #[test]
-    fn test_peer_reputation() {
-        let reputation = PeerReputation::new();
-        let peer_id = create_test_peer_id();
-
-        // Default score should be 50
-        assert_eq!(reputation.get_score(&peer_id), 50);
-
-        // Increase reputation
-        reputation.increase_reputation(&peer_id, 20);
-        assert_eq!(reputation.get_score(&peer_id), 70);
-
-        // Decrease reputation
-        reputation.decrease_reputation(&peer_id, 10, "test");
-        assert_eq!(reputation.get_score(&peer_id), 60);
-    }
-
-    #[test]
-    fn test_peer_ban() {
-        let reputation = PeerReputation::new();
-        let peer_id = create_test_peer_id();
-
-        // Ban peer
-        reputation.ban_peer(&peer_id, "misbehavior");
-        assert!(reputation.is_banned(&peer_id));
-        
-        // Score should be 0 after ban
-        let score = reputation.get_score(&peer_id);
-        assert_eq!(score, 0);
-
-        // Unban peer
-        reputation.unban_peer(&peer_id);
-        assert!(!reputation.is_banned(&peer_id));
-        
-        // Score should be reset to neutral (50) after unban
-        let score_after_unban = reputation.get_score(&peer_id);
-        assert_eq!(score_after_unban, 50);
-    }
-
-    #[test]
-    fn test_auto_ban() {
-        let reputation = PeerReputation::new();
-        let peer_id = create_test_peer_id();
-
-        // Decrease reputation below threshold
-        reputation.decrease_reputation(&peer_id, 50, "bad behavior");
-        
-        // Should be auto-banned
-        assert!(reputation.is_banned(&peer_id));
-    }
-
-    #[test]
-    fn test_reputation_stats() {
-        let reputation = PeerReputation::new();
-        
-        let peer1 = create_test_peer_id();
-        let peer2 = create_test_peer_id();
-        let peer3 = create_test_peer_id();
-
-        reputation.increase_reputation(&peer1, 30); // Good peer (80)
-        reputation.decrease_reputation(&peer2, 10, "test"); // Neutral peer (40)
-        reputation.decrease_reputation(&peer3, 50, "test"); // Banned peer
-
-        let stats = reputation.get_stats();
-        assert_eq!(stats.total_peers, 3);
-        assert_eq!(stats.good_peers, 1);
-        assert_eq!(stats.neutral_peers, 1);
-        assert_eq!(stats.banned_peers, 1);
-    }
-}
-

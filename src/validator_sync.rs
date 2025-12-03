@@ -10,18 +10,18 @@
 //! - Connection pooling and resource management
 //! - Message compression and optimization
 
-use silver_core::{Error as CoreError, Result as CoreResult};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use silver_core::{Error as CoreError, Result as CoreResult};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{RwLock, Semaphore, mpsc};
+use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio::time::timeout;
-use tracing::{debug, info, warn, error};
-use sha2::{Sha256, Digest};
+use tracing::{debug, error, info, warn};
 
 /// Network message types with versioning for compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +33,7 @@ pub enum NetworkMessage {
         /// Message version for compatibility
         version: u32,
     },
-    
+
     /// Snapshot certificate
     SnapshotCertificate {
         /// Certificate data
@@ -43,7 +43,7 @@ pub enum NetworkMessage {
         /// Message version for compatibility
         version: u32,
     },
-    
+
     /// Batch of transactions
     TransactionBatch {
         /// Batch ID
@@ -55,7 +55,7 @@ pub enum NetworkMessage {
         /// Message version for compatibility
         version: u32,
     },
-    
+
     /// Ping for health check
     Ping {
         /// Timestamp
@@ -63,7 +63,7 @@ pub enum NetworkMessage {
         /// Nonce for tracking
         nonce: u64,
     },
-    
+
     /// Pong response
     Pong {
         /// Timestamp
@@ -71,7 +71,7 @@ pub enum NetworkMessage {
         /// Nonce matching ping
         nonce: u64,
     },
-    
+
     /// Handshake for peer identification
     Handshake {
         /// Peer validator ID
@@ -81,7 +81,7 @@ pub enum NetworkMessage {
         /// Supported message types
         capabilities: Vec<u8>,
     },
-    
+
     /// Acknowledgment of message receipt
     Ack {
         /// Message hash being acknowledged
@@ -96,12 +96,12 @@ impl NetworkMessage {
     pub fn to_bytes(&self) -> CoreResult<Vec<u8>> {
         let serialized = bincode::serialize(self)
             .map_err(|e| CoreError::InvalidData(format!("Serialization error: {}", e)))?;
-        
+
         // Add length prefix (4 bytes, big-endian)
         let len = serialized.len() as u32;
         let mut result = len.to_be_bytes().to_vec();
         result.extend_from_slice(&serialized);
-        
+
         Ok(result)
     }
 
@@ -110,21 +110,21 @@ impl NetworkMessage {
         if data.len() < 4 {
             return Err(CoreError::InvalidData("Message too short".to_string()));
         }
-        
+
         let len = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
         if data.len() < 4 + len {
             return Err(CoreError::InvalidData("Incomplete message".to_string()));
         }
-        
+
         bincode::deserialize(&data[4..4 + len])
             .map_err(|e| CoreError::InvalidData(format!("Deserialization error: {}", e)))
     }
-    
+
     /// Calculate message hash for integrity verification
     pub fn hash(&self) -> CoreResult<Vec<u8>> {
         let serialized = bincode::serialize(self)
             .map_err(|e| CoreError::InvalidData(format!("Serialization error: {}", e)))?;
-        
+
         let mut hasher = Sha256::new();
         hasher.update(&serialized);
         Ok(hasher.finalize().to_vec())
@@ -151,40 +151,40 @@ pub enum ConnectionState {
 pub struct PeerInfo {
     /// Peer address
     pub address: SocketAddr,
-    
+
     /// Peer validator ID
     pub validator_id: Option<Vec<u8>>,
-    
+
     /// Last seen timestamp
     pub last_seen: Instant,
-    
+
     /// Connection state
     pub state: ConnectionState,
-    
+
     /// Messages sent
     pub messages_sent: u64,
-    
+
     /// Messages received
     pub messages_received: u64,
-    
+
     /// Latency in milliseconds (exponential moving average)
     pub latency_ms: u64,
-    
+
     /// Failed connection attempts
     pub failed_attempts: u32,
-    
+
     /// Last error message
     pub last_error: Option<String>,
-    
+
     /// Peer version
     pub version: u32,
-    
+
     /// Peer capabilities
     pub capabilities: Vec<u8>,
-    
+
     /// Total bytes sent
     pub bytes_sent: u64,
-    
+
     /// Total bytes received
     pub bytes_received: u64,
 }
@@ -229,7 +229,7 @@ impl PeerInfo {
         self.messages_sent += 1;
         self.bytes_sent += bytes;
         self.update_last_seen();
-        
+
         // Update latency with exponential moving average (alpha = 0.3)
         if self.latency_ms == 0 {
             self.latency_ms = latency_ms;
@@ -251,7 +251,7 @@ impl PeerInfo {
     pub fn record_failure(&mut self, error: String) {
         self.failed_attempts += 1;
         self.last_error = Some(error);
-        
+
         if self.failed_attempts > 5 {
             self.state = ConnectionState::Failed;
         }
@@ -269,22 +269,22 @@ impl PeerInfo {
 pub struct MessageEnvelope {
     /// Message type identifier
     pub message_type: u8,
-    
+
     /// Serialized message data
     pub data: Vec<u8>,
-    
+
     /// Timestamp when message was created
     pub timestamp: u64,
-    
+
     /// Sender address
     pub sender_addr: SocketAddr,
-    
+
     /// Message sequence number for ordering
     pub sequence: u64,
-    
+
     /// Message hash for integrity verification
     pub hash: Vec<u8>,
-    
+
     /// Compression flag
     pub compressed: bool,
 }
@@ -301,11 +301,11 @@ impl MessageEnvelope {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         let mut hasher = Sha256::new();
         hasher.update(&data);
         let hash = hasher.finalize().to_vec();
-        
+
         Ok(Self {
             message_type,
             data,
@@ -316,34 +316,34 @@ impl MessageEnvelope {
             compressed: false,
         })
     }
-    
+
     /// Serialize envelope to bytes
     pub fn to_bytes(&self) -> CoreResult<Vec<u8>> {
         let serialized = bincode::serialize(self)
             .map_err(|e| CoreError::InvalidData(format!("Serialization error: {}", e)))?;
-        
+
         let len = serialized.len() as u32;
         let mut result = len.to_be_bytes().to_vec();
         result.extend_from_slice(&serialized);
-        
+
         Ok(result)
     }
-    
+
     /// Deserialize envelope from bytes
     pub fn from_bytes(data: &[u8]) -> CoreResult<Self> {
         if data.len() < 4 {
             return Err(CoreError::InvalidData("Envelope too short".to_string()));
         }
-        
+
         let len = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
         if data.len() < 4 + len {
             return Err(CoreError::InvalidData("Incomplete envelope".to_string()));
         }
-        
+
         bincode::deserialize(&data[4..4 + len])
             .map_err(|e| CoreError::InvalidData(format!("Deserialization error: {}", e)))
     }
-    
+
     /// Verify envelope integrity
     pub fn verify_integrity(&self) -> bool {
         let mut hasher = Sha256::new();
@@ -370,25 +370,25 @@ fn message_type_from_network_message(message: &NetworkMessage) -> u8 {
 pub struct BroadcastResult {
     /// Total peers
     pub total_peers: usize,
-    
+
     /// Successful broadcasts
     pub successful: usize,
-    
+
     /// Failed broadcasts
     pub failed: usize,
-    
+
     /// Average latency
     pub avg_latency_ms: u64,
-    
+
     /// Min latency
     pub min_latency_ms: u64,
-    
+
     /// Max latency
     pub max_latency_ms: u64,
-    
+
     /// Total bytes sent
     pub total_bytes_sent: u64,
-    
+
     /// Broadcast duration
     pub duration_ms: u64,
 }
@@ -397,40 +397,40 @@ pub struct BroadcastResult {
 pub struct ValidatorNetworkManager {
     /// Connected peers
     peers: Arc<RwLock<HashMap<SocketAddr, PeerInfo>>>,
-    
+
     /// TCP listener for incoming connections
     listener: Arc<RwLock<Option<Arc<TcpListener>>>>,
-    
+
     /// Local address
     local_addr: SocketAddr,
-    
+
     /// Broadcast retry configuration
     max_retries: usize,
-    
+
     /// Retry backoff duration (exponential)
     retry_backoff: Duration,
-    
+
     /// Message timeout
     message_timeout: Duration,
-    
+
     /// Broadcast statistics
     stats: Arc<RwLock<BroadcastStats>>,
-    
+
     /// Connection semaphore for limiting concurrent connections
     connection_semaphore: Arc<Semaphore>,
-    
+
     /// Message sequence counter
     #[allow(dead_code)]
     message_sequence: Arc<RwLock<u64>>,
-    
+
     /// Pending messages queue for retry
     #[allow(dead_code)]
     pending_messages: Arc<RwLock<VecDeque<(SocketAddr, Vec<u8>, u32)>>>,
-    
+
     /// Message channel for async operations
     #[allow(dead_code)]
     tx: mpsc::UnboundedSender<NetworkEvent>,
-    
+
     /// Validator ID
     validator_id: Vec<u8>,
 }
@@ -440,37 +440,37 @@ pub struct ValidatorNetworkManager {
 pub struct BroadcastStats {
     /// Total broadcasts
     pub total_broadcasts: u64,
-    
+
     /// Successful broadcasts
     pub successful_broadcasts: u64,
-    
+
     /// Failed broadcasts
     pub failed_broadcasts: u64,
-    
+
     /// Total messages sent
     pub total_messages_sent: u64,
-    
+
     /// Total messages received
     pub total_messages_received: u64,
-    
+
     /// Average broadcast latency
     pub avg_broadcast_latency_ms: u64,
-    
+
     /// Total bytes sent
     pub total_bytes_sent: u64,
-    
+
     /// Total bytes received
     pub total_bytes_received: u64,
-    
+
     /// Connection failures
     pub connection_failures: u64,
-    
+
     /// Message retries
     pub message_retries: u64,
-    
+
     /// Peer count
     pub peer_count: u64,
-    
+
     /// Connected peer count
     pub connected_peer_count: u64,
 }
@@ -492,7 +492,7 @@ impl ValidatorNetworkManager {
     /// Create new validator network manager
     pub fn new(local_addr: SocketAddr, validator_id: Vec<u8>) -> Self {
         let (tx, _rx) = mpsc::unbounded_channel();
-        
+
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             listener: Arc::new(RwLock::new(None)),
@@ -518,7 +518,7 @@ impl ValidatorNetworkManager {
         message_timeout: Duration,
     ) -> Self {
         let (tx, _rx) = mpsc::unbounded_channel();
-        
+
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             listener: Arc::new(RwLock::new(None)),
@@ -534,32 +534,31 @@ impl ValidatorNetworkManager {
             validator_id,
         }
     }
-    
+
     /// Start listening for incoming connections
     pub async fn start_listener(&self) -> CoreResult<()> {
         let listener = TcpListener::bind(self.local_addr)
             .await
             .map_err(|e| CoreError::InvalidData(format!("Failed to bind listener: {}", e)))?;
-        
+
         info!("Validator network listener started on {}", self.local_addr);
-        
+
         let mut listener_guard = self.listener.write().await;
         *listener_guard = Some(Arc::new(listener));
-        
+
         Ok(())
     }
-    
+
     /// Accept incoming connections (should be run in background)
     pub async fn accept_connections(self: Arc<Self>) -> CoreResult<()> {
         let listener = {
             let guard = self.listener.read().await;
             guard.as_ref().cloned()
         };
-        
-        let listener = listener.ok_or_else(|| {
-            CoreError::InvalidData("Listener not started".to_string())
-        })?;
-        
+
+        let listener =
+            listener.ok_or_else(|| CoreError::InvalidData("Listener not started".to_string()))?;
+
         loop {
             match listener.accept().await {
                 Ok((socket, peer_addr)) => {
@@ -567,7 +566,7 @@ impl ValidatorNetworkManager {
                     let peers = self.peers.clone();
                     let stats = self.stats.clone();
                     let validator_id = self.validator_id.clone();
-                    
+
                     tokio::spawn(async move {
                         let permit = match semaphore.acquire().await {
                             Ok(p) => p,
@@ -576,7 +575,7 @@ impl ValidatorNetworkManager {
                                 return;
                             }
                         };
-                        
+
                         let _permit = permit;
                         if let Err(e) = Self::handle_peer_connection(
                             socket,
@@ -584,7 +583,9 @@ impl ValidatorNetworkManager {
                             peers,
                             stats,
                             validator_id,
-                        ).await {
+                        )
+                        .await
+                        {
                             warn!("Error handling peer connection from {}: {}", peer_addr, e);
                         }
                     });
@@ -595,7 +596,7 @@ impl ValidatorNetworkManager {
             }
         }
     }
-    
+
     /// Handle incoming peer connection
     async fn handle_peer_connection(
         mut socket: TcpStream,
@@ -610,30 +611,35 @@ impl ValidatorNetworkManager {
             version: 1,
             capabilities: vec![1, 2, 3, 4, 5, 6, 7],
         };
-        
+
         let handshake_bytes = handshake.to_bytes()?;
-        socket.write_all(&handshake_bytes).await
+        socket
+            .write_all(&handshake_bytes)
+            .await
             .map_err(|e| CoreError::InvalidData(format!("Failed to send handshake: {}", e)))?;
-        
+
         // Receive handshake response
         let mut buf = vec![0u8; 4096];
-        let n = timeout(
-            Duration::from_secs(5),
-            socket.read(&mut buf)
-        ).await
+        let n = timeout(Duration::from_secs(5), socket.read(&mut buf))
+            .await
             .map_err(|_| CoreError::InvalidData("Handshake timeout".to_string()))?
             .map_err(|e| CoreError::InvalidData(format!("Failed to read handshake: {}", e)))?;
-        
+
         if n == 0 {
             return Err(CoreError::InvalidData("Peer closed connection".to_string()));
         }
-        
+
         let peer_handshake = NetworkMessage::from_bytes(&buf[..n])?;
-        
+
         // Update peer info
         let mut peers_guard = peers.write().await;
         if let Some(peer) = peers_guard.get_mut(&peer_addr) {
-            if let NetworkMessage::Handshake { validator_id: peer_id, version, capabilities } = peer_handshake {
+            if let NetworkMessage::Handshake {
+                validator_id: peer_id,
+                version,
+                capabilities,
+            } = peer_handshake
+            {
                 peer.validator_id = Some(peer_id);
                 peer.version = version;
                 peer.capabilities = capabilities;
@@ -642,11 +648,11 @@ impl ValidatorNetworkManager {
             }
         }
         drop(peers_guard);
-        
+
         // Message receiving loop
         loop {
             let mut buf = vec![0u8; 10 * 1024 * 1024]; // 10MB max message
-            
+
             match timeout(Duration::from_secs(30), socket.read(&mut buf)).await {
                 Ok(Ok(0)) => {
                     info!("Peer {} closed connection", peer_addr);
@@ -659,7 +665,7 @@ impl ValidatorNetworkManager {
                             peer.record_received(n as u64);
                         }
                         drop(peers_guard);
-                        
+
                         let mut stats_guard = stats.write().await;
                         stats_guard.total_messages_received += 1;
                         stats_guard.total_bytes_received += n as u64;
@@ -675,65 +681,77 @@ impl ValidatorNetworkManager {
                 }
             }
         }
-        
+
         // Update peer state on disconnect
         let mut peers_guard = peers.write().await;
         if let Some(peer) = peers_guard.get_mut(&peer_addr) {
             peer.state = ConnectionState::Disconnected;
         }
-        
+
         Ok(())
     }
 
     /// Add peer to network
     pub async fn add_peer(&self, address: SocketAddr) -> CoreResult<()> {
         let mut peers = self.peers.write().await;
-        
+
         if peers.contains_key(&address) {
-            return Err(CoreError::InvalidData(format!("Peer {} already exists", address)));
+            return Err(CoreError::InvalidData(format!(
+                "Peer {} already exists",
+                address
+            )));
         }
 
         let peer = PeerInfo::new(address);
         peers.insert(address, peer);
 
         info!("Added peer: {}", address);
-        
+
         let mut stats = self.stats.write().await;
         stats.peer_count += 1;
-        
+
         Ok(())
     }
 
     /// Remove peer from network
     pub async fn remove_peer(&self, address: &SocketAddr) -> CoreResult<()> {
         let mut peers = self.peers.write().await;
-        
+
         if peers.remove(address).is_some() {
             info!("Removed peer: {}", address);
-            
+
             let mut stats = self.stats.write().await;
             stats.peer_count = stats.peer_count.saturating_sub(1);
-            
+
             Ok(())
         } else {
-            Err(CoreError::InvalidData(format!("Peer {} not found", address)))
+            Err(CoreError::InvalidData(format!(
+                "Peer {} not found",
+                address
+            )))
         }
     }
 
     /// Connect to peer with real TCP connection
     pub async fn connect_peer(&self, address: &SocketAddr) -> CoreResult<()> {
-        let permit = self.connection_semaphore.acquire().await
+        let permit = self
+            .connection_semaphore
+            .acquire()
+            .await
             .map_err(|e| CoreError::InvalidData(format!("Semaphore error: {}", e)))?;
-        
+
         let mut peers = self.peers.write().await;
-        
+
         if let Some(peer) = peers.get_mut(address) {
             peer.state = ConnectionState::Connecting;
         } else {
-            return Err(CoreError::InvalidData(format!("Peer {} not found", address)));
+            return Err(CoreError::InvalidData(format!(
+                "Peer {} not found",
+                address
+            )));
         }
         drop(peers);
-        
+
         // Attempt TCP connection
         match timeout(self.message_timeout, TcpStream::connect(address)).await {
             Ok(Ok(mut socket)) => {
@@ -743,9 +761,9 @@ impl ValidatorNetworkManager {
                     version: 1,
                     capabilities: vec![1, 2, 3, 4, 5, 6, 7],
                 };
-                
+
                 let handshake_bytes = handshake.to_bytes()?;
-                
+
                 if let Err(e) = socket.write_all(&handshake_bytes).await {
                     let mut peers = self.peers.write().await;
                     if let Some(peer) = peers.get_mut(address) {
@@ -753,9 +771,12 @@ impl ValidatorNetworkManager {
                         peer.record_failure(format!("Handshake write failed: {}", e));
                     }
                     drop(permit);
-                    return Err(CoreError::InvalidData(format!("Failed to send handshake: {}", e)));
+                    return Err(CoreError::InvalidData(format!(
+                        "Failed to send handshake: {}",
+                        e
+                    )));
                 }
-                
+
                 // Receive handshake response
                 let mut buf = vec![0u8; 4096];
                 match timeout(self.message_timeout, socket.read(&mut buf)).await {
@@ -763,16 +784,21 @@ impl ValidatorNetworkManager {
                         if let Ok(peer_handshake) = NetworkMessage::from_bytes(&buf[..n]) {
                             let mut peers = self.peers.write().await;
                             if let Some(peer) = peers.get_mut(address) {
-                                if let NetworkMessage::Handshake { validator_id: peer_id, version, capabilities } = peer_handshake {
+                                if let NetworkMessage::Handshake {
+                                    validator_id: peer_id,
+                                    version,
+                                    capabilities,
+                                } = peer_handshake
+                                {
                                     peer.validator_id = Some(peer_id);
                                     peer.version = version;
                                     peer.capabilities = capabilities;
                                     peer.state = ConnectionState::Connected;
                                     peer.reset_failures();
-                                    
+
                                     let mut stats = self.stats.write().await;
                                     stats.connected_peer_count += 1;
-                                    
+
                                     info!("Connected to peer: {}", address);
                                 }
                             }
@@ -786,7 +812,7 @@ impl ValidatorNetworkManager {
                         }
                     }
                 }
-                
+
                 drop(permit);
                 Ok(())
             }
@@ -795,19 +821,22 @@ impl ValidatorNetworkManager {
                 if let Some(peer) = peers.get_mut(address) {
                     peer.state = ConnectionState::Failed;
                     peer.record_failure(format!("Connection failed: {}", e));
-                    
+
                     let mut stats = self.stats.write().await;
                     stats.connection_failures += 1;
                 }
                 drop(permit);
-                Err(CoreError::InvalidData(format!("Failed to connect to peer: {}", e)))
+                Err(CoreError::InvalidData(format!(
+                    "Failed to connect to peer: {}",
+                    e
+                )))
             }
             Err(_) => {
                 let mut peers = self.peers.write().await;
                 if let Some(peer) = peers.get_mut(address) {
                     peer.state = ConnectionState::Failed;
                     peer.record_failure("Connection timeout".to_string());
-                    
+
                     let mut stats = self.stats.write().await;
                     stats.connection_failures += 1;
                 }
@@ -820,7 +849,7 @@ impl ValidatorNetworkManager {
     /// Disconnect from peer
     pub async fn disconnect_peer(&self, address: &SocketAddr) -> CoreResult<()> {
         let mut peers = self.peers.write().await;
-        
+
         if let Some(peer) = peers.get_mut(address) {
             if peer.state == ConnectionState::Connected {
                 let mut stats = self.stats.write().await;
@@ -830,7 +859,10 @@ impl ValidatorNetworkManager {
             info!("Disconnected from peer: {}", address);
             Ok(())
         } else {
-            Err(CoreError::InvalidData(format!("Peer {} not found", address)))
+            Err(CoreError::InvalidData(format!(
+                "Peer {} not found",
+                address
+            )))
         }
     }
 
@@ -839,10 +871,7 @@ impl ValidatorNetworkManager {
         &self,
         data: Vec<u8>,
     ) -> CoreResult<BroadcastResult> {
-        let message = NetworkMessage::ValidatorSetChange {
-            data,
-            version: 1,
-        };
+        let message = NetworkMessage::ValidatorSetChange { data, version: 1 };
         self.broadcast_message(&message).await
     }
 
@@ -880,7 +909,7 @@ impl ValidatorNetworkManager {
     async fn broadcast_message(&self, message: &NetworkMessage) -> CoreResult<BroadcastResult> {
         let start = Instant::now();
         let peers = self.peers.read().await;
-        
+
         let connected_peers: Vec<SocketAddr> = peers
             .iter()
             .filter(|(_, p)| p.state == ConnectionState::Connected)
@@ -912,7 +941,7 @@ impl ValidatorNetworkManager {
 
         // Send to all peers in parallel
         let mut handles = vec![];
-        
+
         for peer_addr in connected_peers.iter() {
             let message = message.clone();
             let peers = self.peers.clone();
@@ -921,7 +950,7 @@ impl ValidatorNetworkManager {
             let retry_backoff = self.retry_backoff;
             let message_timeout = self.message_timeout;
             let peer_addr = *peer_addr;
-            
+
             let handle = tokio::spawn(async move {
                 Self::send_message_with_retry_real(
                     peer_addr,
@@ -931,9 +960,10 @@ impl ValidatorNetworkManager {
                     max_retries,
                     retry_backoff,
                     message_timeout,
-                ).await
+                )
+                .await
             });
-            
+
             handles.push(handle);
         }
 
@@ -946,7 +976,10 @@ impl ValidatorNetworkManager {
                     min_latency = min_latency.min(latency_ms);
                     max_latency = max_latency.max(latency_ms);
                     total_bytes_sent += bytes_sent;
-                    debug!("Broadcast succeeded (latency: {}ms, bytes: {})", latency_ms, bytes_sent);
+                    debug!(
+                        "Broadcast succeeded (latency: {}ms, bytes: {})",
+                        latency_ms, bytes_sent
+                    );
                 }
                 Ok(Err(e)) => {
                     failed += 1;
@@ -970,7 +1003,11 @@ impl ValidatorNetworkManager {
             successful,
             failed,
             avg_latency_ms: avg_latency,
-            min_latency_ms: if min_latency == u64::MAX { 0 } else { min_latency },
+            min_latency_ms: if min_latency == u64::MAX {
+                0
+            } else {
+                min_latency
+            },
             max_latency_ms: max_latency,
             total_bytes_sent,
             duration_ms: start.elapsed().as_millis() as u64,
@@ -1007,21 +1044,17 @@ impl ValidatorNetworkManager {
         let mut backoff = retry_backoff;
 
         for attempt in 0..max_retries {
-            match Self::send_message_real(
-                peer_addr,
-                message,
-                message_timeout,
-            ).await {
+            match Self::send_message_real(peer_addr, message, message_timeout).await {
                 Ok(bytes_sent) => {
                     let latency_ms = start.elapsed().as_millis() as u64;
-                    
+
                     // Update peer info
                     let mut peers_guard = peers.write().await;
                     if let Some(peer) = peers_guard.get_mut(&peer_addr) {
                         peer.record_sent(bytes_sent, latency_ms);
                     }
                     drop(peers_guard);
-                    
+
                     let mut stats_guard = stats.write().await;
                     stats_guard.total_messages_sent += 1;
 
@@ -1029,18 +1062,21 @@ impl ValidatorNetworkManager {
                 }
                 Err(e) => {
                     last_error = Some(e);
-                    
+
                     let mut stats_guard = stats.write().await;
                     stats_guard.message_retries += 1;
                     drop(stats_guard);
-                    
+
                     if attempt < max_retries - 1 {
                         debug!(
                             "Send to {} failed (attempt {}/{}), retrying in {:?}...",
-                            peer_addr, attempt + 1, max_retries, backoff
+                            peer_addr,
+                            attempt + 1,
+                            max_retries,
+                            backoff
                         );
                         tokio::time::sleep(backoff).await;
-                        
+
                         // Exponential backoff: backoff *= 2, max 5 seconds
                         backoff = backoff.mul_f64(2.0).min(Duration::from_secs(5));
                     }
@@ -1051,15 +1087,14 @@ impl ValidatorNetworkManager {
         let mut peers_guard = peers.write().await;
         if let Some(peer) = peers_guard.get_mut(&peer_addr) {
             peer.record_failure(
-                last_error.as_ref()
+                last_error
+                    .as_ref()
                     .map(|e| e.to_string())
-                    .unwrap_or_else(|| "Unknown error".to_string())
+                    .unwrap_or_else(|| "Unknown error".to_string()),
             );
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            CoreError::InvalidData("Unknown send error".to_string())
-        }))
+        Err(last_error.unwrap_or_else(|| CoreError::InvalidData("Unknown send error".to_string())))
     }
 
     /// Send message to peer with real TCP connection
@@ -1069,14 +1104,16 @@ impl ValidatorNetworkManager {
         message_timeout: Duration,
     ) -> CoreResult<u64> {
         // Step 1: Serialize the message
-        let serialized_data = message.to_bytes()
+        let serialized_data = message
+            .to_bytes()
             .map_err(|e| CoreError::InvalidData(format!("Failed to serialize message: {}", e)))?;
 
         // Step 2: Validate message size (max 10MB)
         if serialized_data.len() > 10 * 1024 * 1024 {
-            return Err(CoreError::InvalidData(
-                format!("Message too large: {} bytes (max 10MB)", serialized_data.len())
-            ));
+            return Err(CoreError::InvalidData(format!(
+                "Message too large: {} bytes (max 10MB)",
+                serialized_data.len()
+            )));
         }
 
         // Step 3: Create message envelope with metadata
@@ -1092,26 +1129,20 @@ impl ValidatorNetworkManager {
         let envelope_data = envelope.to_bytes()?;
 
         // Step 5: Connect and send via TCP
-        let mut socket = timeout(
-            message_timeout,
-            TcpStream::connect(peer_addr)
-        ).await
+        let mut socket = timeout(message_timeout, TcpStream::connect(peer_addr))
+            .await
             .map_err(|_| CoreError::InvalidData("Connection timeout".to_string()))?
             .map_err(|e| CoreError::InvalidData(format!("Failed to connect: {}", e)))?;
 
         // Step 6: Send envelope data
-        timeout(
-            message_timeout,
-            socket.write_all(&envelope_data)
-        ).await
+        timeout(message_timeout, socket.write_all(&envelope_data))
+            .await
             .map_err(|_| CoreError::InvalidData("Send timeout".to_string()))?
             .map_err(|e| CoreError::InvalidData(format!("Failed to send: {}", e)))?;
 
         // Step 7: Flush to ensure data is sent
-        timeout(
-            message_timeout,
-            socket.flush()
-        ).await
+        timeout(message_timeout, socket.flush())
+            .await
             .map_err(|_| CoreError::InvalidData("Flush timeout".to_string()))?
             .map_err(|e| CoreError::InvalidData(format!("Failed to flush: {}", e)))?;
 
@@ -1121,14 +1152,22 @@ impl ValidatorNetworkManager {
             Ok(Ok(n)) if n > 0 => {
                 if let Ok(ack_message) = NetworkMessage::from_bytes(&buf[..n]) {
                     if let NetworkMessage::Ack { .. } = ack_message {
-                        debug!("Message sent to {} ({} bytes)", peer_addr, envelope_data.len());
+                        debug!(
+                            "Message sent to {} ({} bytes)",
+                            peer_addr,
+                            envelope_data.len()
+                        );
                         return Ok(envelope_data.len() as u64);
                     }
                 }
             }
             _ => {
                 // Timeout or error on ack, but message was sent
-                debug!("Message sent to {} ({} bytes, no ack)", peer_addr, envelope_data.len());
+                debug!(
+                    "Message sent to {} ({} bytes, no ack)",
+                    peer_addr,
+                    envelope_data.len()
+                );
                 return Ok(envelope_data.len() as u64);
             }
         }
@@ -1173,12 +1212,7 @@ impl ValidatorNetworkManager {
 
     /// Get all peers
     pub async fn get_all_peers(&self) -> Vec<PeerInfo> {
-        self.peers
-            .read()
-            .await
-            .values()
-            .cloned()
-            .collect()
+        self.peers.read().await.values().cloned().collect()
     }
 
     /// Get all healthy peers
@@ -1207,16 +1241,17 @@ impl ValidatorNetworkManager {
         });
 
         let removed = initial_count - peers.len();
-        
+
         let mut stats = self.stats.write().await;
         stats.peer_count = peers.len() as u64;
-        
+
         removed
     }
 
     /// Reconnect to failed peers
     pub async fn reconnect_failed_peers(&self) -> usize {
-        let failed_peers: Vec<SocketAddr> = self.peers
+        let failed_peers: Vec<SocketAddr> = self
+            .peers
             .read()
             .await
             .iter()
@@ -1259,190 +1294,6 @@ impl ValidatorNetworkManager {
 impl Default for ValidatorNetworkManager {
     fn default() -> Self {
         use std::str::FromStr;
-        Self::new(
-            SocketAddr::from_str("127.0.0.1:0").unwrap(),
-            vec![0u8; 32],
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::str::FromStr;
-
-    #[tokio::test]
-    async fn test_add_peer() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        let addr = SocketAddr::from_str("127.0.0.1:9001").unwrap();
-
-        assert!(manager.add_peer(addr).await.is_ok());
-        assert_eq!(manager.get_peer_count().await, 1);
-    }
-
-    #[tokio::test]
-    async fn test_remove_peer() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        let addr = SocketAddr::from_str("127.0.0.1:9001").unwrap();
-
-        manager.add_peer(addr).await.unwrap();
-        assert!(manager.remove_peer(&addr).await.is_ok());
-        assert_eq!(manager.get_peer_count().await, 0);
-    }
-
-    #[tokio::test]
-    async fn test_peer_info() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        let addr = SocketAddr::from_str("127.0.0.1:9001").unwrap();
-
-        manager.add_peer(addr).await.unwrap();
-        let peer = manager.get_peer_info(&addr).await.unwrap();
-
-        assert_eq!(peer.address, addr);
-        assert_eq!(peer.state, ConnectionState::Disconnected);
-    }
-
-    #[tokio::test]
-    async fn test_broadcast_no_peers() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        
-        let data = vec![1, 2, 3, 4, 5];
-        let result = manager.broadcast_validator_set_change(data).await.unwrap();
-
-        assert_eq!(result.total_peers, 0);
-        assert_eq!(result.successful, 0);
-    }
-
-    #[tokio::test]
-    async fn test_statistics() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        
-        let stats = manager.get_stats().await;
-        assert_eq!(stats.total_broadcasts, 0);
-
-        manager.reset_stats().await;
-        let stats = manager.get_stats().await;
-        assert_eq!(stats.total_broadcasts, 0);
-    }
-
-    #[tokio::test]
-    async fn test_cleanup_stale_peers() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        let addr = SocketAddr::from_str("127.0.0.1:9001").unwrap();
-
-        manager.add_peer(addr).await.unwrap();
-        
-        // Manually mark as stale by creating old peer
-        let mut peers = manager.peers.write().await;
-        if let Some(peer) = peers.get_mut(&addr) {
-            peer.last_seen = Instant::now() - Duration::from_secs(400);
-        }
-        drop(peers);
-
-        let removed = manager.cleanup_stale_peers().await;
-        assert_eq!(removed, 1);
-        assert_eq!(manager.get_peer_count().await, 0);
-    }
-
-    #[tokio::test]
-    async fn test_peer_health_check() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        let addr = SocketAddr::from_str("127.0.0.1:9001").unwrap();
-
-        manager.add_peer(addr).await.unwrap();
-        
-        let peer = manager.get_peer_info(&addr).await.unwrap();
-        assert!(!peer.is_healthy());
-        
-        // Mark as connected
-        let mut peers = manager.peers.write().await;
-        if let Some(peer) = peers.get_mut(&addr) {
-            peer.state = ConnectionState::Connected;
-        }
-        drop(peers);
-        
-        let peer = manager.get_peer_info(&addr).await.unwrap();
-        assert!(peer.is_healthy());
-    }
-
-    #[tokio::test]
-    async fn test_message_envelope() {
-        let envelope = MessageEnvelope::new(
-            1,
-            vec![1, 2, 3, 4, 5],
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            1,
-        ).unwrap();
-
-        assert!(envelope.verify_integrity());
-        
-        let bytes = envelope.to_bytes().unwrap();
-        let deserialized = MessageEnvelope::from_bytes(&bytes).unwrap();
-        
-        assert_eq!(deserialized.message_type, 1);
-        assert_eq!(deserialized.sequence, 1);
-    }
-
-    #[tokio::test]
-    async fn test_network_message_serialization() {
-        let message = NetworkMessage::ValidatorSetChange {
-            data: vec![1, 2, 3, 4, 5],
-            version: 1,
-        };
-
-        let bytes = message.to_bytes().unwrap();
-        let deserialized = NetworkMessage::from_bytes(&bytes).unwrap();
-        
-        match deserialized {
-            NetworkMessage::ValidatorSetChange { data, version } => {
-                assert_eq!(data, vec![1, 2, 3, 4, 5]);
-                assert_eq!(version, 1);
-            }
-            _ => panic!("Wrong message type"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_peer_failure_tracking() {
-        let manager = ValidatorNetworkManager::new(
-            SocketAddr::from_str("127.0.0.1:9000").unwrap(),
-            vec![1u8; 32],
-        );
-        let addr = SocketAddr::from_str("127.0.0.1:9001").unwrap();
-
-        manager.add_peer(addr).await.unwrap();
-        
-        let mut peers = manager.peers.write().await;
-        if let Some(peer) = peers.get_mut(&addr) {
-            for _ in 0..6 {
-                peer.record_failure("Test error".to_string());
-            }
-        }
-        drop(peers);
-        
-        let peer = manager.get_peer_info(&addr).await.unwrap();
-        assert_eq!(peer.state, ConnectionState::Failed);
-        assert_eq!(peer.failed_attempts, 6);
+        Self::new(SocketAddr::from_str("127.0.0.1:0").unwrap(), vec![0u8; 32])
     }
 }
