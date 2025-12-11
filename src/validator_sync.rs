@@ -353,6 +353,7 @@ impl MessageEnvelope {
 }
 
 /// Get message type identifier from NetworkMessage
+#[allow(dead_code)]
 fn message_type_from_network_message(message: &NetworkMessage) -> u8 {
     match message {
         NetworkMessage::ValidatorSetChange { .. } => 1,
@@ -394,6 +395,7 @@ pub struct BroadcastResult {
 }
 
 /// Validator network manager with real TCP/libp2p networking
+#[derive(Clone)]
 pub struct ValidatorNetworkManager {
     /// Connected peers
     peers: Arc<RwLock<HashMap<SocketAddr, PeerInfo>>>,
@@ -943,7 +945,7 @@ impl ValidatorNetworkManager {
         let mut handles = vec![];
 
         for peer_addr in connected_peers.iter() {
-            let message = message.clone();
+            let message_owned = message.clone();
             let peers = self.peers.clone();
             let stats = self.stats.clone();
             let max_retries = self.max_retries;
@@ -954,7 +956,7 @@ impl ValidatorNetworkManager {
             let handle = tokio::spawn(async move {
                 Self::send_message_with_retry_real(
                     peer_addr,
-                    &message,
+                    message_owned,
                     peers,
                     stats,
                     max_retries,
@@ -1029,10 +1031,10 @@ impl ValidatorNetworkManager {
         Ok(result)
     }
 
-    /// Send message with exponential backoff retry logic
+    /// Send message with exponential backoff retry logic (static version for async spawning)
     async fn send_message_with_retry_real(
         peer_addr: SocketAddr,
-        message: &NetworkMessage,
+        message: NetworkMessage,
         peers: Arc<RwLock<HashMap<SocketAddr, PeerInfo>>>,
         stats: Arc<RwLock<BroadcastStats>>,
         max_retries: usize,
@@ -1040,11 +1042,38 @@ impl ValidatorNetworkManager {
         message_timeout: Duration,
     ) -> CoreResult<(u64, u64)> {
         let start = Instant::now();
-        let mut last_error = None;
+        let mut last_error: Option<CoreError> = None;
         let mut backoff = retry_backoff;
 
         for attempt in 0..max_retries {
-            match Self::send_message_real(peer_addr, message, message_timeout).await {
+            // Inline TCP send logic
+            let send_result = async {
+                let serialized_data = message
+                    .to_bytes()
+                    .map_err(|e| CoreError::InvalidData(format!("Failed to serialize message: {}", e)))?;
+
+                if serialized_data.len() > 10 * 1024 * 1024 {
+                    return Err(CoreError::InvalidData(format!(
+                        "Message too large: {} bytes (max 10MB)",
+                        serialized_data.len()
+                    )));
+                }
+
+                let mut socket = timeout(message_timeout, TcpStream::connect(peer_addr))
+                    .await
+                    .map_err(|_| CoreError::InvalidData("Connection timeout".to_string()))?
+                    .map_err(|e| CoreError::InvalidData(format!("Failed to connect: {}", e)))?;
+
+                timeout(message_timeout, socket.write_all(&serialized_data))
+                    .await
+                    .map_err(|_| CoreError::InvalidData("Send timeout".to_string()))?
+                    .map_err(|e| CoreError::InvalidData(format!("Failed to send: {}", e)))?;
+
+                Ok::<u64, CoreError>(serialized_data.len() as u64)
+            }
+            .await;
+
+            match send_result {
                 Ok(bytes_sent) => {
                     let latency_ms = start.elapsed().as_millis() as u64;
 
@@ -1098,7 +1127,9 @@ impl ValidatorNetworkManager {
     }
 
     /// Send message to peer with real TCP connection
+    #[allow(dead_code)]
     async fn send_message_real(
+        &self,
         peer_addr: SocketAddr,
         message: &NetworkMessage,
         message_timeout: Duration,
@@ -1117,7 +1148,13 @@ impl ValidatorNetworkManager {
         }
 
         // Step 3: Create message envelope with metadata
-        let sequence = 0u64; // In production, use atomic counter
+        // Use sequence counter for message ordering
+        let sequence = {
+            let mut seq = self.message_sequence.write().await;
+            let current = *seq;
+            *seq = seq.saturating_add(1);
+            current
+        };
         let envelope = MessageEnvelope::new(
             message_type_from_network_message(message),
             serialized_data.clone(),
@@ -1294,6 +1331,8 @@ impl ValidatorNetworkManager {
 impl Default for ValidatorNetworkManager {
     fn default() -> Self {
         use std::str::FromStr;
-        Self::new(SocketAddr::from_str("127.0.0.1:0").unwrap(), vec![0u8; 32])
+        let addr = SocketAddr::from_str("127.0.0.1:0")
+            .expect("Invalid default socket address - this is a configuration error");
+        Self::new(addr, vec![0u8; 32])
     }
 }

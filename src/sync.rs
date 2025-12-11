@@ -275,9 +275,14 @@ impl StateSync {
         
         for tx_digest in &snapshot.transactions {
             // Check if transaction is available locally
-            // For now, assume all transactions are available
-            // In production, this would check against a transaction store
-            missing_transactions.push(*tx_digest);
+            if let Some(_tx) = self.downloaded_transactions.get(tx_digest) {
+                // Transaction is available locally
+                debug!("Transaction {} is available locally", tx_digest);
+            } else {
+                // Transaction is missing
+                missing_transactions.push(*tx_digest);
+                debug!("Transaction {} is missing", tx_digest);
+            }
         }
         
         if !missing_transactions.is_empty() {

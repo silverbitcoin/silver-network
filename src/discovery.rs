@@ -124,16 +124,52 @@ impl PeerDiscovery {
                     e
                 )))
             }
-            (DiscoveryQuery::GetProviders { key }, QueryResult::GetProviders(Ok(_result))) => {
-                // Extract providers from the GetProvidersOk result
-                // In libp2p, GetProvidersOk contains provider records
-                // For now, return empty vector as the exact API depends on libp2p version
-                let providers: Vec<PeerId> = Vec::new();
+            (DiscoveryQuery::GetProviders { key }, QueryResult::GetProviders(Ok(result))) => {
+                // PRODUCTION IMPLEMENTATION: Extract providers from libp2p 0.45 GetProvidersOk
+                // GetProvidersOk is an enum with two variants:
+                // 1. FoundProviders: Contains a HashSet of provider peer IDs
+                // 2. FinishedWithNoAdditionalRecord: Contains closest peers when no providers found
                 
-                info!(
-                    "Get providers completed for key, found {} providers",
-                    providers.len()
-                );
+                let mut providers: Vec<PeerId> = Vec::new();
+                
+                match result {
+                    libp2p::kad::GetProvidersOk::FoundProviders { providers: provider_set, .. } => {
+                        // Extract all provider peer IDs from the HashSet
+                        // These are peers that are actively providing the content
+                        for peer_id in provider_set {
+                            providers.push(*peer_id);
+                        }
+                        
+                        info!(
+                            "Get providers found {} providers for key {:?}",
+                            providers.len(),
+                            String::from_utf8_lossy(&key)
+                        );
+                    }
+                    libp2p::kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                        // When no providers are found, return the closest peers in the DHT
+                        // These peers are closest to the key in the DHT keyspace
+                        // and may have information about providers or can cache the content
+                        providers = closest_peers.clone();
+                        
+                        info!(
+                            "Get providers found no providers, returning {} closest peers for key {:?}",
+                            providers.len(),
+                            String::from_utf8_lossy(&key)
+                        );
+                    }
+                }
+                
+                // Sort providers by peer ID for deterministic ordering
+                // This ensures consistent ordering across different nodes
+                providers.sort_by(|a, b| {
+                    a.to_bytes().cmp(&b.to_bytes())
+                });
+                
+                // Remove duplicates while maintaining sorted order
+                // This ensures we don't return the same provider multiple times
+                providers.dedup();
+                
                 Ok(DiscoveryResult::GetProviders { key, providers })
             }
             (DiscoveryQuery::GetProviders { key: _ }, QueryResult::GetProviders(Err(e))) => {

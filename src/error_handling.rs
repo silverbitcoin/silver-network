@@ -321,12 +321,27 @@ impl ComprehensiveErrorHandler {
             "ALERT: Critical network error - operator intervention required"
         );
 
-        // In production, this would send alerts via:
-        // - Email
-        // - SMS
-        // - Slack/Discord
-        // - PagerDuty
-        // - Monitoring system
+        // Log the critical error with full context
+        let recovery_action = self.recovery_manager.handle_error(
+            &context.peer_id.clone().unwrap_or_else(|| "unknown".to_string()),
+            &error,
+        ).ok().and_then(|action| Some(format!("{:?}", action)));
+        
+        self.logger.log_error(
+            &error,
+            &context,
+            true,
+            recovery_action.clone(),
+        );
+
+        // Trigger recovery action for critical errors
+        if self.enable_alerts {
+            // Notify recovery manager to take action
+            info!(
+                "Critical error recovery action: {:?}",
+                recovery_action
+            );
+        }
     }
 
     /// Get error logger

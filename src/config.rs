@@ -53,8 +53,11 @@ pub struct NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
+        let listen_address = "/ip4/0.0.0.0/tcp/9000".parse()
+            .expect("Invalid default listen address - this is a configuration error");
+        
         Self {
-            listen_address: "/ip4/0.0.0.0/tcp/9000".parse().unwrap(),
+            listen_address,
             external_address: None,
             bootstrap_peers: Vec::new(),
             max_peers: 50,
