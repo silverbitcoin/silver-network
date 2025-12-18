@@ -1,0 +1,42 @@
+[package]
+name = "silver-network"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "P2P networking layer using libp2p for SilverBitcoin"
+
+[dependencies]
+# Core
+silver-core = { path = "../silver-core" }
+silver-crypto = { path = "../silver-crypto" }
+
+# Workspace dependencies
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+
+# Networking
+libp2p = { workspace = true }
+multiaddr = { workspace = true }
+
+# Utilities
+humantime = "2.1"
+snap = "1.1" # OPTIMIZATION: Snappy compression 
+sha2 = "0.10"
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+mockall = { workspace = true }
