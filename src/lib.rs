@@ -1,13 +1,14 @@
 //! # SilverBitcoin Network
 //!
-//! P2P networking layer using libp2p.
+//! P2P networking layer using libp2p for Proof-of-Work mining.
 //!
 //! This crate provides:
 //! - Peer discovery (DHT)
 //! - Message propagation (gossipsub)
 //! - Connection management
 //! - Rate limiting and security
-//! - State synchronization protocol
+//! - Mining pool support
+//! - Work distribution and share collection
 
 #![warn(missing_docs, rust_2018_idioms)]
 #![forbid(unsafe_code)]
@@ -51,8 +52,8 @@ pub mod message;
 /// Message compression and batching optimization
 pub mod compression;
 
-/// Validator synchronization and broadcasting
-pub mod validator_sync;
+/// Mining pool support and work distribution
+pub mod mining_pool;
 
 pub use behaviour::SilverBehaviour;
 pub use compression::{BatchStats, CompressionStats, MessageBatcher, MessageCompressor};
@@ -71,16 +72,14 @@ pub use message::{MessageType, NetworkMessage};
 pub use peer::{PeerId, PeerInfo, PeerManager};
 pub use security::{PeerReputation, RateLimiter as SecurityRateLimiter};
 pub use sync::StateSync;
-pub use validator_sync::{
-    BroadcastResult, NetworkMessage as ValidatorNetworkMessage, PeerInfo as ValidatorPeerInfo,
-    ValidatorNetworkManager,
-};
+pub use mining_pool::{MiningPoolManager, WorkPackage, MinerShare};
 
 /// Network handle for broadcasting and communication.
 ///
 /// Provides high-level interface for:
-/// - Broadcasting batches to validators
-/// - Broadcasting certificates
+/// - Broadcasting transactions
+/// - Broadcasting blocks
+/// - Mining pool communication
 /// - Peer management
 pub struct NetworkHandle {
     /// Gossip protocol for message propagation
@@ -88,6 +87,8 @@ pub struct NetworkHandle {
     /// Peer manager for connection management
     #[allow(dead_code)]
     peer_manager: PeerManager,
+    /// Mining pool manager
+    pool_manager: Option<MiningPoolManager>,
 }
 
 impl NetworkHandle {
@@ -96,29 +97,39 @@ impl NetworkHandle {
         Self {
             gossip,
             peer_manager,
+            pool_manager: None,
         }
     }
 
-    /// Broadcast a batch to all validators
+    /// Create a network handle with mining pool support
+    pub fn with_mining_pool(
+        gossip: GossipProtocol,
+        peer_manager: PeerManager,
+        pool_manager: MiningPoolManager,
+    ) -> Self {
+        Self {
+            gossip,
+            peer_manager,
+            pool_manager: Some(pool_manager),
+        }
+    }
+
+    /// Broadcast a transaction to all peers
+    pub async fn broadcast_transaction(&self, tx: &silver_core::Transaction) -> Result<()> {
+        let data =
+            bincode::serialize(tx).map_err(|e| NetworkError::Serialization(e.to_string()))?;
+        self.gossip.broadcast(MessageType::Transaction, data).await
+    }
+
+    /// Broadcast a batch (mined block) to all peers
     pub async fn broadcast_batch(&self, batch: &silver_core::TransactionBatch) -> Result<()> {
-        // Serialize batch
         let data =
             bincode::serialize(batch).map_err(|e| NetworkError::Serialization(e.to_string()))?;
-
-        // Broadcast via gossip
         self.gossip.broadcast(MessageType::Batch, data).await
     }
 
-    /// Broadcast a certificate to all validators
-    pub async fn broadcast_certificate(
-        &self,
-        certificate: &silver_core::Certificate,
-    ) -> Result<()> {
-        // Serialize certificate
-        let data = bincode::serialize(certificate)
-            .map_err(|e| NetworkError::Serialization(e.to_string()))?;
-
-        // Broadcast via gossip
-        self.gossip.broadcast(MessageType::Certificate, data).await
+    /// Get mining pool manager if available
+    pub fn mining_pool(&self) -> Option<&MiningPoolManager> {
+        self.pool_manager.as_ref()
     }
 }

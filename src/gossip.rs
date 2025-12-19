@@ -309,8 +309,8 @@ impl GossipProtocol {
         let topic = match message_type {
             crate::MessageType::Transaction => topics::TRANSACTIONS,
             crate::MessageType::Batch => topics::BATCHES,
-            crate::MessageType::Certificate => topics::CERTIFICATES,
-            crate::MessageType::Snapshot => topics::SNAPSHOTS,
+            crate::MessageType::WorkPackage => topics::WORK_PACKAGES,
+            crate::MessageType::MinerShare => topics::MINER_SHARES,
             _ => {
                 return Err(NetworkError::InvalidMessage(format!(
                     "Unsupported message type for broadcast: {:?}",
@@ -405,9 +405,9 @@ pub mod topics {
     /// Batch propagation topic
     pub const BATCHES: &str = "silverbitcoin/batches/1.0.0";
 
-    /// Certificate propagation topic
-    pub const CERTIFICATES: &str = "silverbitcoin/certificates/1.0.0";
+    /// Work package distribution topic
+    pub const WORK_PACKAGES: &str = "silverbitcoin/work-packages/1.0.0";
 
-    /// Snapshot propagation topic
-    pub const SNAPSHOTS: &str = "silverbitcoin/snapshots/1.0.0";
+    /// Miner share submission topic
+    pub const MINER_SHARES: &str = "silverbitcoin/miner-shares/1.0.0";
 }

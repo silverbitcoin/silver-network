@@ -33,8 +33,8 @@ pub struct PeerInfo {
     /// Reputation score (0-100)
     pub reputation: u8,
 
-    /// Whether this is a validator peer
-    pub is_validator: bool,
+    /// Whether this is a mining pool peer
+    pub is_mining_pool: bool,
 
     /// Protocol version
     pub protocol_version: Option<String>,
@@ -72,7 +72,7 @@ impl PeerInfo {
             messages_sent: 0,
             messages_received: 0,
             reputation: 50, // Start with neutral reputation
-            is_validator: false,
+            is_mining_pool: false,
             protocol_version: None,
             agent_version: None,
         }
@@ -210,10 +210,10 @@ impl PeerManager {
         }
     }
 
-    /// Mark peer as validator
-    pub fn mark_as_validator(&self, peer_id: &PeerId) {
+    /// Mark peer as mining pool
+    pub fn mark_as_mining_pool(&self, peer_id: &PeerId) {
         if let Some(mut peer) = self.peers.get_mut(peer_id) {
-            peer.is_validator = true;
+            peer.is_mining_pool = true;
         }
     }
 
@@ -278,11 +278,11 @@ impl PeerManager {
             .collect()
     }
 
-    /// Get all validator peers
-    pub fn validator_peers(&self) -> Vec<PeerId> {
+    /// Get all mining pool peers
+    pub fn mining_pool_peers(&self) -> Vec<PeerId> {
         self.peers
             .iter()
-            .filter(|entry| entry.is_validator && entry.status == PeerStatus::Connected)
+            .filter(|entry| entry.is_mining_pool && entry.status == PeerStatus::Connected)
             .map(|entry| entry.peer_id)
             .collect()
     }
@@ -329,7 +329,7 @@ impl PeerManager {
     pub fn get_stats(&self) -> PeerStats {
         let total = self.peers.len();
         let connected = self.connected_count();
-        let validators = self.validator_peers().len();
+        let mining_pools = self.mining_pool_peers().len();
         let banned = self
             .peers
             .iter()
@@ -339,7 +339,7 @@ impl PeerManager {
         PeerStats {
             total,
             connected,
-            validators,
+            mining_pools,
             banned,
         }
     }
@@ -354,8 +354,8 @@ pub struct PeerStats {
     /// Number of connected peers
     pub connected: usize,
 
-    /// Number of validator peers
-    pub validators: usize,
+    /// Number of mining pool peers
+    pub mining_pools: usize,
 
     /// Number of banned peers
     pub banned: usize,

@@ -1,45 +1,49 @@
 use serde::{Deserialize, Serialize};
-use silver_core::{Certificate, Snapshot, Transaction, TransactionBatch};
+use silver_core::{Transaction, TransactionBatch};
 
-/// Network message types
+/// Network message types for Proof-of-Work mining
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     /// Transaction message
     Transaction(Transaction),
 
-    /// Transaction batch message
+    /// Transaction batch message (mined block)
     Batch(TransactionBatch),
 
-    /// Certificate message
-    Certificate(Certificate),
-
-    /// Snapshot message
-    Snapshot(Snapshot),
-
-    /// Request for snapshot
-    SnapshotRequest {
-        /// Sequence number of requested snapshot
-        sequence_number: u64,
+    /// Work package for mining pool
+    WorkPackage {
+        /// Work ID
+        work_id: u64,
+        /// Block header data
+        header: Vec<u8>,
+        /// Target difficulty
+        target: u64,
+        /// Chain ID
+        chain_id: u32,
     },
 
-    /// Response to snapshot request
-    SnapshotResponse {
-        /// Requested snapshot (None if not found)
-        snapshot: Option<Snapshot>,
+    /// Miner share submission
+    MinerShare {
+        /// Work ID
+        work_id: u64,
+        /// Nonce found by miner
+        nonce: u64,
+        /// Miner address
+        miner_address: Vec<u8>,
     },
 
-    /// Request for transactions
-    TransactionRequest {
-        /// Starting sequence number
+    /// Request for batches
+    BatchRequest {
+        /// Starting batch sequence
         from_sequence: u64,
-        /// Ending sequence number
+        /// Ending batch sequence
         to_sequence: u64,
     },
 
-    /// Response to transaction request
-    TransactionResponse {
-        /// Requested transactions
-        transactions: Vec<Transaction>,
+    /// Response to batch request
+    BatchResponse {
+        /// Requested batches
+        batches: Vec<TransactionBatch>,
     },
 
     /// Ping message for keep-alive
@@ -62,18 +66,14 @@ pub enum MessageType {
     Transaction,
     /// Batch
     Batch,
-    /// Certificate
-    Certificate,
-    /// Snapshot
-    Snapshot,
-    /// Snapshot request
-    SnapshotRequest,
-    /// Snapshot response
-    SnapshotResponse,
-    /// Transaction request
-    TransactionRequest,
-    /// Transaction response
-    TransactionResponse,
+    /// Work package
+    WorkPackage,
+    /// Miner share
+    MinerShare,
+    /// Batch request
+    BatchRequest,
+    /// Batch response
+    BatchResponse,
     /// Ping
     Ping,
     /// Pong
@@ -86,12 +86,10 @@ impl NetworkMessage {
         match self {
             Self::Transaction(_) => MessageType::Transaction,
             Self::Batch(_) => MessageType::Batch,
-            Self::Certificate(_) => MessageType::Certificate,
-            Self::Snapshot(_) => MessageType::Snapshot,
-            Self::SnapshotRequest { .. } => MessageType::SnapshotRequest,
-            Self::SnapshotResponse { .. } => MessageType::SnapshotResponse,
-            Self::TransactionRequest { .. } => MessageType::TransactionRequest,
-            Self::TransactionResponse { .. } => MessageType::TransactionResponse,
+            Self::WorkPackage { .. } => MessageType::WorkPackage,
+            Self::MinerShare { .. } => MessageType::MinerShare,
+            Self::BatchRequest { .. } => MessageType::BatchRequest,
+            Self::BatchResponse { .. } => MessageType::BatchResponse,
             Self::Ping { .. } => MessageType::Ping,
             Self::Pong { .. } => MessageType::Pong,
         }
@@ -109,22 +107,13 @@ impl NetworkMessage {
 
     /// Get estimated size of message in bytes
     pub fn estimated_size(&self) -> usize {
-        // This is an approximation; actual size may vary
         match self {
-            Self::Transaction(_) => 1024,      // ~1KB per transaction
-            Self::Batch(_) => 512 * 1024,      // ~512KB per batch
-            Self::Certificate(_) => 10 * 1024, // ~10KB per certificate
-            Self::Snapshot(_) => 100 * 1024,   // ~100KB per snapshot
-            Self::SnapshotRequest { .. } => 64,
-            Self::SnapshotResponse { snapshot } => {
-                if snapshot.is_some() {
-                    100 * 1024
-                } else {
-                    64
-                }
-            }
-            Self::TransactionRequest { .. } => 64,
-            Self::TransactionResponse { transactions } => transactions.len() * 1024,
+            Self::Transaction(_) => 1024,           // ~1KB per transaction
+            Self::Batch(_) => 512 * 1024,           // ~512KB per batch
+            Self::WorkPackage { .. } => 256,        // ~256 bytes per work package
+            Self::MinerShare { .. } => 128,         // ~128 bytes per share
+            Self::BatchRequest { .. } => 64,        // ~64 bytes
+            Self::BatchResponse { batches } => batches.len() * 512 * 1024,
             Self::Ping { .. } => 32,
             Self::Pong { .. } => 32,
         }
