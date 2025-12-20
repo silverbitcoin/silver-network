@@ -45,7 +45,7 @@ impl RateLimiter {
         let mut entry = self
             .peer_messages
             .entry(*peer_id)
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         // Remove old messages outside the window
         while let Some(&front) = entry.front() {

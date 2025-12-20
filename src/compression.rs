@@ -116,7 +116,7 @@ impl MessageCompressor {
         let compressed = self
             .encoder
             .compress_vec(data)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         // Check if compression actually helped
         if compressed.len() >= data.len() {
@@ -180,7 +180,7 @@ impl MessageCompressor {
         let decompressed = self
             .decoder
             .decompress_vec(payload)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         // Update statistics
         self.stats.bytes_decompressed += decompressed.len() as u64;

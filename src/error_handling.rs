@@ -324,12 +324,12 @@ impl ComprehensiveErrorHandler {
         // Log the critical error with full context
         let recovery_action = self.recovery_manager.handle_error(
             &context.peer_id.clone().unwrap_or_else(|| "unknown".to_string()),
-            &error,
-        ).ok().and_then(|action| Some(format!("{:?}", action)));
+            error,
+        ).ok().map(|action| format!("{:?}", action));
         
         self.logger.log_error(
-            &error,
-            &context,
+            error,
+            context,
             true,
             recovery_action.clone(),
         );
